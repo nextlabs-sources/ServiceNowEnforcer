@@ -1,0 +1,1731 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ui_script">
+    <sys_ui_script action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <description/>
+        <global>false</global>
+        <name>x_230565_emsn.user-attributes</name>
+        <script><![CDATA[///<reference path="./typings/user-attr-store.d.ts"/>
+///<reference path="./typings/util.d.ts" />
+///<reference path="./typings/sdk.d.ts" />
+
+(function () {
+
+	var jslog = window.parent.jslog;
+    var APP_SCOPE_NAME = window.parent.MY_SCOPE_NAME || 'x_230565_emsn';
+    var APP_SCOPE_SYS_ID = window.parent.MY_SCOPE_SYSID;
+    var TREEVIEW_ATTR_PREFIX = 'tree';
+    var TABLE_REF_PREFIX = 'ref';
+    var TREE_NODE_ID = 0;
+    var SYS_USER_TABLE = 'sys_user';
+
+    var util = nxl.util;
+    var sdk = nxl.sdk;
+    var $ = util.$;
+    var $$ = util.$$;
+    var _extend = util.extend;
+    var createDOM = util.createDOMFromString;
+    var fetchData = sdk.fetchRestFactory(util.format('/api/{0}', APP_SCOPE_NAME));
+    var fetchMetaData = sdk.fetchFactory('SysMeta');
+
+    //#region - the data
+
+    /**
+     * tables for data
+     * - all attribute tables follow the format: { attrId: table }
+     * - table definitions can be found in typings/user-attr-store.d.ts
+     */
+    var store = {
+        entityAttrFetchStatus: {},
+        entityEnforcer: {},
+        entityInfo: {},
+        attrInfo: {},
+        attrEnforcer: {},
+        refAttrInfo: {},
+        refAttrEnforcer: {},
+    };
+
+    /**
+     * element caches used to locate element by id/compositeId
+     * - list caches entity-card-checkbox elements in entity list
+     * - summary caches summary-entity-card elements in summary entity list
+     */
+    var elementMaps = {
+        table: {}
+    };
+
+    var elements = {
+        topSaveBtn: $('#topbarSaveBtn'),
+        topSaveExportBtn: $('#topbarExportAndSaveBtn'),
+        bottomSaveBtn: $('#bottomSaveBtn'),
+        bottomSaveExportBtn: $('#bottomSaveExportBtn'),
+        tableHeader: $('#attrTable > thead'),
+        tableBody: $('#attrTable > tbody'),
+        totalAttrCounter: $('#totalAttrCounter'),
+        selectedAttrCounter: $('#selectedAttrCounter'),
+        selectAllBtn: $('#select-attr-all'),
+        fieldCancelBtn: $('#fieldSelectorCancelBtn'),
+        fieldConfirmBtn: $('#fieldSelectorConfirmBtn'),
+    };
+
+    //#endregion    
+
+    //#region - components
+    var treeviewSelector = {
+        el: $('#fieldSelectorModal'),
+        wrap: $('#treevieweWrap'),
+        show: function () {
+            this.el.classList.remove('hide');
+        },
+        hide: function () {
+            this.el.classList.add('hide');
+        },
+        clear: function () {
+            this.wrap.textContent = '';
+        }
+    };
+    //#endregion
+
+    //#region - services
+
+    var service = {
+
+        /**
+         * get entity from store tables
+         * @param {string} id
+         * @return {SE.ViewModel.Entity}
+         */
+        getEntityById: function (id) {
+            if (id == null) {
+                return null;
+            }
+
+            return _extend({}, store.entityInfo[id], store.entityEnforcer[id]);
+        },
+
+        /**
+         * get attributes of an entity from store tables
+         * @param {string} id
+         * @return {SE.ViewModel.Attribute[]}
+         */
+        getAttributesByEntityId: function (id) {
+            if (id == null) {
+                return [];
+            }
+
+            var compositeIds = Object.keys(store.attrInfo);
+
+            return compositeIds
+                .filter(function (compositeId) {
+                    var entityId = compositeId.split(':')[0];
+                    return entityId === id;
+                })
+                .map(function (compositeId) {
+                    return _extend(
+                        {},
+                        store.attrInfo[compositeId],
+                        store.attrEnforcer[compositeId]
+                    );
+                });
+        },
+
+        getWillEnforcedAttributesByEntityId: function (entityId) {
+
+            var primitiveAttrs = service.getAttributesByEntityId(entityId).filter(function (attr) { return attr.willEnforced; });
+            var refAttrs = service.getEnforcedRefAttributesByEntityId(entityId);
+
+            return primitiveAttrs.concat(refAttrs);
+        },
+
+        /**
+         * get attribute from store tables
+         * @param {string} id
+         * @return {SE.ViewModel.Attribute}
+         */
+        getAttributeByCompositeId: function (id) {
+
+            if (id == null) {
+                return null;
+            }
+
+            return _extend({}, store.attrInfo[id], store.attrEnforcer[id]);
+        },
+
+        /**
+         * get entities from table
+         * @return {SE.ViewModel.Attribute[]}
+         */
+        getAllAttributes: function () {
+
+            var attrs = [];
+
+            attrs = attrs.concat(
+                Object.keys(store.attrInfo).map(function (id) {
+                    return service.getAttributeByCompositeId(id);
+                })
+            )
+
+            return attrs;
+        },
+
+        /**
+         * @return {NXL_UserAttribute[]}
+         */
+        getWillEnforcedAttributes: function () {
+
+            return Object.keys(store.attrEnforcer).filter(function (id) {
+                return store.attrEnforcer[id].willEnforced;
+            }).map(function (id) {
+                return _extend({}, store.attrEnforcer[id], store.attrInfo[id]);
+            });
+        },
+
+        /**
+         * @param {string} entityId
+         * @return {SE.ViewModel.Attribute[]}
+         */
+        getAllRefAttributesByCompositeId: function (id) {
+
+            if (id == null) {
+                return [];
+            }
+
+            var compositeIds = Object.keys(store.refAttrInfo);
+
+            return compositeIds.filter(function (compositeId) {
+                var entityAttrId = compositeId.split('-')[0];
+                return entityAttrId === id;
+            }).map(function (compositeId) {
+
+                var enforced = (store.refAttrEnforcer[compositeId] && !!store.refAttrEnforcer[compositeId].enforced)
+                var willEnforced = (store.refAttrEnforcer[compositeId] && !!store.refAttrEnforcer[compositeId].willEnforced)
+
+                return _extend({}, store.refAttrInfo[compositeId], { enforced: enforced, willEnforced: willEnforced });
+            });
+        },
+
+        /**
+         * @param {string} compositeId
+         * @return {SE.ViewModel.Attribute}
+         */
+        getEnforcedRefAttributeByCompositeId: function (compositeId) {
+            if (compositeId == null) {
+                return null;
+            }
+
+            var enforced = (store.refAttrEnforcer[compositeId] && !!store.refAttrEnforcer[compositeId].enforced)
+            var willEnforced = (store.refAttrEnforcer[compositeId] && !!store.refAttrEnforcer[compositeId].willEnforced)        
+
+            if(willEnforced) {
+                return _extend({}, store.refAttrInfo[compositeId], { enforced: enforced, willEnforced: willEnforced });
+            } else {
+                return null
+            }
+        },
+
+        /**
+         * @param {string} entityId
+         * @return {SE.ViewModel.Attribute[]}
+         */
+        getEnforcedRefAttributesByCompositeId: function (id) {
+
+            if (id == null) {
+                return [];
+            }
+
+            var compositeIds = Object.keys(store.refAttrInfo);
+
+            return compositeIds.filter(function (compositeId) {
+                var entityAttrId = compositeId.split('-')[0];
+                return entityAttrId === id && !!store.refAttrEnforcer[compositeId].willEnforced;
+            }).map(function (compositeId) {
+
+                var enforced = (store.refAttrEnforcer[compositeId] && !!store.refAttrEnforcer[compositeId].enforced)
+                var willEnforced = (store.refAttrEnforcer[compositeId] && !!store.refAttrEnforcer[compositeId].willEnforced)
+
+                return _extend({}, store.refAttrInfo[compositeId], { enforced: enforced, willEnforced: willEnforced });
+            });
+        },
+
+        /**
+         * @param {string} entityId
+         * @return {SE.ViewModel.Attribute[]}
+         */
+        getEnforcedRefAttributesByEntityId: function (entityId) {
+
+            if (entityId == null) {
+                return [];
+            }
+
+            var compositeIds = Object.keys(store.refAttrInfo);
+
+            return compositeIds.filter(function (compositeId) {
+                var id = compositeId.split(':')[0];
+                return entityId === id && !!store.refAttrEnforcer[compositeId].willEnforced;
+            }).map(function (compositeId) {
+                return _extend({}, store.refAttrInfo[compositeId], { enforced: !!store.refAttrEnforcer[compositeId].enforced, willEnforced: !!store.refAttrEnforcer[compositeId].willEnforced });
+            });
+        },
+
+        /**
+         * @param {string} entityId
+         * @return {SE.Tables.FetchStatus}
+         */
+        getEntityAttrFetchStatus: function (entityId) {
+            return _extend({}, store.entityAttrFetchStatus[entityId]);
+        },
+
+        /**
+         * set attribute enforcement by compositeId
+         * @param {string} compositeId 
+         * @param {boolean} enforce 
+         */
+        setAttributeEnforcement: function (id, enforce) {
+
+            var attrEnforcer = store.attrEnforcer[id];
+
+            if (attrEnforcer) {
+                attrEnforcer.willEnforced = !!enforce;
+            }
+            else {
+                attrEnforcerHydrator(id, enforce);
+                //jslog(util.format('setAttributeEnforcement failed. attrEnforcer of {0} not found.', id));
+            }
+        },
+
+        /**
+         * @param {string} id
+         * @param {boolean} enforce
+         */
+        setBatchRefAttributeEnforcementById: function (id, enforce) {
+
+            if (id == null) {
+                jslog(util.format('setBatchRefAttributeEnforcementById failed, compositeId: {0}', id));
+                return;
+            }
+
+            var compositeIds = Object.keys(store.refAttrEnforcer);
+
+            compositeIds.filter(function (compositeId) {
+                var entityAttrId = compositeId.split('-')[0];
+                return entityAttrId === id;
+            }).forEach(function (compositeId) {
+
+                var enfocer = store.refAttrEnforcer[compositeId];
+
+                if (enforce) {
+                    enforce.willEnforced = enforce;
+                }
+                else {
+                    refAttrEnforcerHydrator(compositeId, enforce);
+                }
+            });
+        },
+    };
+
+    //endregion
+
+    //#region - entry point
+    (function init() {
+
+        initListeners();
+
+        fetchMetaAttribute(SYS_USER_TABLE)
+            .then(fetchEnforcedAttributes)
+            .then(function () {
+                var attrs = service.getAllAttributes();
+			    // filter datatype
+			     var filteredAttrs = attrs.filter((item)=>{return (item.datatype!='related_tags'&&item.datatype!='sys_class_name'&&item.datatype!='glide_date_time'&&item.datatype!='domain_path'&&item.datatype!='glide_date'&&item.datatype!='password'&&item.datatype!='user_image')});			   
+                renderAttrTable(filteredAttrs);
+                setTotalAttrCount();
+                setSelectedAttrCount();
+                return Promise.resolve();
+            })
+            .catch(function (e) {
+                jslog(e);
+            });
+
+    })();
+
+    function initListeners() {
+        elements.topSaveBtn.onclick = saveHandler.bind(this);
+        elements.bottomSaveBtn.onclick = saveHandler.bind(this);
+        elements.tableHeader.onclick = sortHandler;
+        elements.selectAllBtn.onclick = selectAllAttrHandler.bind(this);
+        elements.topSaveExportBtn.onclick = exportAndSaveHandler.bind(this);
+        elements.bottomSaveExportBtn.onclick = exportAndSaveHandler.bind(this);
+        elements.fieldConfirmBtn.onclick = fieldSelectorConfirmHandler.bind(this);
+        elements.fieldCancelBtn.onclick = treeviewSelector.hide.bind(treeviewSelector);
+    }
+
+    //#endregion
+
+    //#region - promisify request 
+    function fetchEnforcedAttributes() {
+
+        var resource = 'userattributes';
+        var data = {
+            'status': true,
+            'func_name': 'GetUserAttributes'
+        };
+        var options = {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json;charset=UTF-8'
+            }
+        };
+
+        return (
+            fetchData(resource, JSON.stringify(data), options)
+                .then(function (payload) {
+
+                    try {
+                        var result = JSON.parse(payload).result;
+
+                        /**
+                         * @type {SE.APIModel.NxlEnforcedAttribute[]}
+                         */
+                        var data = JSON.parse(result.user_attributes);
+
+                        if (Array.isArray(data)) {
+                            data.forEach(function (attr) {
+                                if (attr.is_reference) {
+                                    refAttributeHydrator(attr, SYS_USER_TABLE);
+                                    refAttrEnforcerHydrator(util.format('{0}:{1}', SYS_USER_TABLE, attr.column_name), attr.active);
+                                } else {
+                                    attrEnforcerHydrator(util.format('{0}:{1}', SYS_USER_TABLE, attr.column_name), attr.active);
+                                }
+                            });
+                        }
+                        else {
+                            return Promise.reject(new Error(util.format('fetchAttributes failed, user_attributes must be array type. data: {0}', data)));
+                        }
+                    } catch (e) {
+                        jslog(e)
+                    }
+
+                    return Promise.resolve();
+
+                })
+                .catch(function (e) {
+                    jslog(util.format('fetchAttributes failed, error: {0}', e));
+                    //alert(e.message);
+                    return Promise.reject(e)
+                })
+        )
+    }
+
+    function postAttributes(attrs) {
+
+        var resource = 'userattributes';
+        var data = {
+            'status': true,
+            'func_name': 'SetUserAttributes',
+            'func_arguments': { 'user_attributes': '' }
+        };
+        var options = {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json;charset=UTF-8'
+            }
+        };
+
+        if (Array.isArray(attrs)) {
+            var models = attrs.map(function (attr) {
+                return attributeDehydrator(attr);
+            });
+            data.func_arguments.user_attributes = JSON.stringify(models);
+        }
+
+        return new Promise(function (resolve, reject) {
+
+            fetchData(resource, JSON.stringify(data), options).then(function (payload) {
+
+                if (typeof resolve === 'function') {
+                    resolve();
+                }
+            }).catch(function (e) {
+
+                if (typeof reject === 'function') {
+                    reject(e);
+                }
+                else {
+                    jslog(e);
+                }
+            });
+
+        });
+
+    }
+
+    function fetchMetaAttribute(entityId) {
+
+        var data = {
+            'scope': APP_SCOPE_NAME,
+            'method': 'getTreeNodes',
+            'type': 'column',
+            'value': entityId
+        };
+
+        return fetchMetaData('', data, false).then(function (payload) {
+
+            /**
+             * @type {SE.APIModel.SNMetaAttriute[]}
+             */
+            var entity = {
+                internal_name: payload.xml.sysparm_value,
+                display_name: payload.xml.label,
+                scope_name: '',
+            }
+            var attrs = payload.xml.item;
+
+            entityHydrator(entity);
+
+            if (Array.isArray(attrs)) {
+
+                entityAttrFetchStatusHydrator(entityId, true);
+
+                attrs.forEach(function (attr) {
+                    snMetaAttributeHydrator(attr, entityId);
+                });
+            }
+            else {
+                jslog(util.format('fetchMetaAttribute failed, response attributes invalid: response: {0}', JSON.stringify(payload)))
+            }
+
+            return Promise.resolve(entityId);
+        });
+    }
+
+    //#endregion
+
+    //#region - event handlers 
+    function homeHandler(e) {
+
+    }
+
+    function saveHandler(e) {
+
+        var attrs = service.getWillEnforcedAttributesByEntityId(SYS_USER_TABLE);
+
+        postAttributes(attrs).then(function () {
+            sdk.fetchFactory('PDPApi')('syncPolicyModel', {
+                data: toUserPolicyModel(attrs)
+            }).then(function () {
+                util.reloadPage();
+            }).catch(function (e) {
+                jslog(e);
+            });
+        });
+    }
+
+    function exportAndSaveHandler(e) {
+
+        var attrs = service.getWillEnforcedAttributesByEntityId(SYS_USER_TABLE);
+
+        util.download(toUserPolicyModel(attrs), util.format('{0}_{1}.bin', 'NextLabs_ServiceNow_PolicyModel', Date.now()));
+
+        var saveEvt = util.createEvent('click');
+        elements.topSaveBtn.dispatchEvent(saveEvt);
+    }
+
+    function toUserPolicyModel(attrs) {
+        var pmEntity = {
+            id: 'user',
+            name: 'user',
+            displayName: 'User',
+            description: 'An actor or subject whose attributes may be referenced in component',
+            scope: 'global',
+            enforced: true,
+            willEnforced: true,
+            attributes: attrs
+        };
+
+        var policy = util.getPolicyModel([pmEntity]);
+        policy.components = [];
+        policy.policyModels[0].obligations = [];
+        policy.policyModels[0].actions = [];
+        return JSON.stringify(policy);
+    }
+
+    function importHandler(e) {
+
+    }
+
+    function attrCheckHandler(e) {
+
+        if (e.target && e.target.type === 'checkbox') {
+            var inputEl = e.target;
+            var tdEl = inputEl.parentElement;
+            var unfoldEl = $('.unfolder-wrap', tdEl);
+            var compositeId = inputEl.id;
+            var entityId = compositeId.split(':')[0];
+            var attr = service.getAttributeByCompositeId(compositeId);
+
+            if (attr && attr.id) {
+
+                elements.fieldConfirmBtn.onclick = fieldSelectorConfirmHandler;
+
+                if (attr.datatype === 'reference' && !attr.willEnforced) {
+
+                    if (inputEl.checked) {
+                        inputEl.checked = false;
+                        treeviewSelector.wrap.setAttribute('data-id', util.format('{0}:{1}', TABLE_REF_PREFIX, entityId));
+                        treeviewSelector.wrap.setAttribute('data-ref-attr', util.format('{0}:{1}', TABLE_REF_PREFIX, compositeId));
+                        referenceAttrCheckHandler(attr);
+                    }
+                    else {
+                        //unenforce all enforced referenc attribuets
+                        service.setBatchRefAttributeEnforcementById(compositeId, false);
+                        updateRefAttrTableCell(compositeId);
+
+                        unfoldEl.classList.add('hide');
+                    }
+                }
+                else {
+                    service.setAttributeEnforcement(compositeId, inputEl.checked);
+                }
+
+                setSelectedAttrCount();
+            }
+            else {
+                jslog(util.format('attrCheckHandler failed, entity: {0}, compositeId: {1}', entityId, compositeId))
+            }
+        }
+    }
+
+    /**
+     * 
+     * @param {SE.ViewModel.Attribute} attr 
+     */
+    function referenceAttrCheckHandler(attr) {
+
+        if (!attr) {
+            throw new Error('referenceAttrCheckHandler failed, invalid attribute');
+        }
+
+        treeviewSelector.clear();
+
+        if (treeviewSelector.wrap) {
+
+            var entityId = attr.referenceTable;
+            var entity = service.getEntityById(entityId);
+
+            if (entity.name) {
+                treeviewSelector.wrap.appendChild(renderTableNode(entity.id, attr.name, attr.displayName));
+            }
+            else {
+                fetchMetaAttribute(entityId).then(function (fetchedEntityId) {
+
+                    entity = service.getEntityById(fetchedEntityId);
+
+                    treeviewSelector.wrap.appendChild(renderTableNode(entity.id, attr.name, attr.displayName));
+                });
+            }
+
+            treeviewSelector.show();
+        }
+        else {
+            jslog(util.format('referenceAttrCheckHandler failed, treeview wrap element not found'));
+        }
+    }
+
+    function selectAllAttrHandler(e) {
+
+        var selectAllCheckbox = e.target;
+        var checkboxEls = $$('input[type=checkbox]', elements.tableBody);
+
+        if (selectAllCheckbox.type === 'checkbox') {
+
+            if (checkboxEls.length) {
+
+                Array.prototype.slice.call(checkboxEls).forEach(function (el) {
+                    if (selectAllCheckbox.checked) {
+                        var attr = service.getAttributeByCompositeId(el.id);
+
+                        if (el.checked !== selectAllCheckbox.checked && attr.datatype !== 'reference') {
+                            var evt = util.createEvent('click');
+                            el.dispatchEvent(evt);
+                        }
+                    } else {
+                        if (el.checked !== selectAllCheckbox.checked) {
+                            var evt = util.createEvent('click');
+                            el.dispatchEvent(evt);
+                        }
+                    }
+                });
+            }
+            else {
+                jslog('selectAllAttrHandler failed, checkbox elements null or empty');
+            }
+        }
+    }
+
+    function sortHandler(e) {
+
+        var el = e.target;
+        var prop = el.getAttribute('data-prop');
+
+        if (prop) {
+            if (elements.tableBody) {
+                elements.tableBody.textContent = '';
+                var sortedAttrs = service.getAllAttributes().sort(function (a, b) {
+                    return el.checked ? alphaDescendSorter(a[prop], b[prop]) : alphaAscendSorter(a[prop], b[prop]);
+                });
+                renderAttrTable(sortedAttrs);
+            }
+            else {
+                jslog('sortHandler failed, element table body not found.');
+            }
+        }
+    }
+
+    function fieldSelectorConfirmHandler(e) {
+
+        var selectedAttrNames = getCheckedAttributeNames(treeviewSelector.wrap);
+        var entityId = treeviewSelector.wrap.getAttribute('data-id').split(':')[1];
+        var entityAttrId = treeviewSelector.wrap.getAttribute('data-ref-attr').slice(TABLE_REF_PREFIX.length + 1);
+        var attrCheckboxEl = $(util.format('input[id="{0}"]', entityAttrId));
+
+        if (attrCheckboxEl) {
+            var tdEl = attrCheckboxEl.parentElement
+            var unfoldEl = $('.unfolder-wrap', tdEl)
+
+            attrCheckboxEl.checked = true;
+
+            if (selectedAttrNames.length) {
+                unfoldEl.classList.remove('hide')
+            } else {
+                unfoldEl.classList.add('hide')
+            }
+        }
+        else {
+            jslog(util.format('fieldSelectorConfirmHandler -> get attribute checkbox failed, compositeId: {0}', entityAttrId));
+        }
+
+        //unenforce previous reference attributes
+        var prevClassifiedEnforcedRefAttrs = selectedAttrNames.reduce(function (prev, attr) {
+            var compositeId = util.format('{0}:{1}', entityId, attr.column_name).split('-')[0];
+            prev[compositeId] = 1;
+            return prev;
+        }, {});
+        var prevEnforcedRefAttrCompositeIds = Object.keys(prevClassifiedEnforcedRefAttrs);
+
+        prevEnforcedRefAttrCompositeIds.forEach(function (compositeId) {
+            service.setBatchRefAttributeEnforcementById(compositeId, false);
+        });
+
+        //store new enforced referenced attributes
+        selectedAttrNames.forEach(function (attr) {
+            refAttributeHydrator(attr, entityId);
+            refAttrEnforcerHydrator(util.format('{0}:{1}', entityId, attr.column_name), true);
+        });
+
+        var refAttrs = selectedAttrNames.map(function (attr) {
+            return service.getEnforcedRefAttributeByCompositeId(util.format('{0}:{1}', entityId, attr.column_name));
+        }).filter(function(attr){ return !!attr });
+
+        var refAttrTableCellMap = refAttrs.reduce(function (prev, attr) {
+
+            //used to get data cells instead of storing.
+            //eg: "alm_asset:assigned_to" (not "alm_asset:assigned_to.xxx.xxx").
+            var compositeId = util.format('{0}:{1}', attr.table, attr.name.split('-')[0]);
+            var refAttrTableCell = getRefAttributeTableCell(compositeId);
+
+            if (refAttrTableCell) {
+                refAttrTableCell.textContent = '';
+                prev[compositeId] = prev[compositeId] || refAttrTableCell;
+            }
+            else {
+                jslog(util.format('fieldSelectorConfirmHandler -> get ref attributes tabel cells failed, compositeId: {0}', compositeId));
+            }
+
+            return prev;
+
+        }, {});
+
+        refAttrs.forEach(function (attr) {
+
+            //used to get data cells instead of storing.
+            //eg: "alm_asset:assigned_to" (not "alm_asset:assigned_to.xxx.xxx").
+            var compositeId = util.format('{0}:{1}', attr.table, attr.name.split('-')[0]);
+            var refAttrTableCell = refAttrTableCellMap[compositeId];
+
+            if (refAttrTableCell) {
+                refAttrTableCell.appendChild(renderRefAttributes(attr));
+            }
+            else {
+                jslog(util.format('fieldSelectorConfirmHandler -> empty tabel cells, compositeId: {0}', compositeId));
+            }
+        });
+
+        treeviewSelector.hide();
+        treeviewSelector.clear();
+
+        setSelectedAttrCount();
+
+        jslog(selectedAttrNames);
+    }
+
+    function fieldSelectorModifyConfirmHandler(e) {
+
+        var selectedAttrNames = getChangedAttributeNames(treeviewSelector.wrap);
+        var entityId = treeviewSelector.wrap.getAttribute('data-id').split(':')[1];
+        var entityAttrId = treeviewSelector.wrap.getAttribute('data-ref-attr').slice(TABLE_REF_PREFIX.length + 1);
+        var entityCheckboxEl = elementMaps.table[entityId];
+        var attrCheckboxEl = $(util.format('input[id="{0}"]', entityAttrId));
+        var prevSelectedRefAttrs = service.getEnforcedRefAttributesByCompositeId(entityAttrId).reduce(function (prev, val) {
+            prev[val.name] = {
+                column_id: val.id,
+                column_name: val.name,
+                column_label: val.displayName,
+                active: true,
+                is_reference: true,
+                type: val.datatype
+            };
+            return prev
+        }, {});
+        var curSelectedRefAttrs = selectedAttrNames.reduce(function (prev, val) { prev[val.column_name] = val; return prev }, {});
+        var totalSelectedRefAttrs = _extend({}, prevSelectedRefAttrs, curSelectedRefAttrs);
+
+        if (attrCheckboxEl) {
+
+            var tdEl = attrCheckboxEl.parentElement
+            var unfoldEl = $('.unfolder-wrap', tdEl)
+
+            attrCheckboxEl.checked = true;
+
+            if (Object.keys(totalSelectedRefAttrs).filter(function (k) { return totalSelectedRefAttrs[k].active }).length) {
+                unfoldEl.classList.remove('hide')
+                attrCheckboxEl.checked = true
+            } else {
+                unfoldEl.classList.add('hide')
+                attrCheckboxEl.checked = false
+            }
+        }
+        else {
+            jslog(util.format('fieldSelectorConfirmHandler -> get attribute checkbox failed, compositeId: {0}', entityAttrId));
+        }
+
+        //update referenced attributes
+        selectedAttrNames.forEach(function (attr) {
+            refAttributeHydrator(attr, entityId);
+            refAttrEnforcerHydrator(util.format('{0}:{1}', entityId, attr.column_name), !!attr.active);
+        });
+
+        var enforcedRefAttrs = Object.keys(totalSelectedRefAttrs).map(function (refAttrId) {
+            return service.getEnforcedRefAttributeByCompositeId(util.format('{0}:{1}', entityId, refAttrId));
+        }).filter(function (attr) { return !!attr });
+
+        var refAttrs = service.getAllRefAttributesByCompositeId(entityAttrId)
+        var refAttrTableCellMap = refAttrs.reduce(function (prev, attr) {
+
+            //used to get data cells instead of storing.
+            //eg: "alm_asset:assigned_to" (not "alm_asset:assigned_to.xxx.xxx").
+            var compositeId = util.format('{0}:{1}', attr.table, attr.name.split('-')[0]);
+            var refAttrTableCell = getRefAttributeTableCell(compositeId);
+
+            if (refAttrTableCell) {
+                refAttrTableCell.textContent = '';
+                prev[compositeId] = prev[compositeId] || refAttrTableCell;
+            }
+            else {
+                jslog(util.format('fieldSelectorConfirmHandler -> get ref attributes tabel cells failed, compositeId: {0}', compositeId));
+            }
+
+            return prev;
+
+        }, {});
+
+        enforcedRefAttrs.forEach(function (attr) {
+
+            //used to get data cells instead of storing.
+            //eg: "alm_asset:assigned_to" (not "alm_asset:assigned_to.xxx.xxx").
+            var compositeId = util.format('{0}:{1}', attr.table, attr.name.split('-')[0]);
+            var refAttrTableCell = refAttrTableCellMap[compositeId];
+
+            if (refAttrTableCell) {
+                refAttrTableCell.appendChild(renderRefAttributes(attr));
+            }
+            else {
+                jslog(util.format('fieldSelectorConfirmHandler -> empty tabel cells, compositeId: {0}', compositeId));
+            }
+        });
+
+        if (entityCheckboxEl) {
+            var evt = util.createEvent('click');
+            entityCheckboxEl.checked = false;
+            entityCheckboxEl.dispatchEvent(evt);
+        }
+        else {
+            jslog(util.format('fieldSelectorModifyConfirmHandler -> trigger entity checked failed, checkbox of {0} not found', entityId));
+        }
+
+        treeviewSelector.hide();
+        treeviewSelector.clear();
+
+        jslog(selectedAttrNames);
+    }
+
+    function toggleTreeNodeHandler(e) {
+
+        var btn = e.target;
+        var wrap = btn && btn.parentElement;
+        var childTreeNodeWrap = wrap && wrap.nextElementSibling;
+        var fieldNodesWrap = wrap && wrap.nextElementSibling;
+
+        if (btn && wrap && fieldNodesWrap && childTreeNodeWrap) {
+
+            var refAttrName = wrap.getAttribute('data-ref-attr');
+            var refPath = wrap.getAttribute('data-path');
+            var isExpand = btn.getAttribute('data-expand') === 'true' ? true : false;
+            var curEntityId = btn.getAttribute('data-table');
+
+            btn.setAttribute('data-expand', (!isExpand).toString());
+
+            if (isExpand) {
+                fieldNodesWrap.classList.add('hide');
+                btn.textContent = '+';
+            }
+            else {
+                fieldNodesWrap.classList.remove('hide');
+                btn.textContent = '-';
+
+                var attrFetchStatus = service.getEntityAttrFetchStatus(curEntityId);
+
+                if (!attrFetchStatus.isFetched) {
+                    fetchMetaAttribute(curEntityId).then(function () {
+                        innerRenderAttributeNodes(curEntityId, refAttrName, childTreeNodeWrap, refPath);
+                    });
+                }
+                else {
+                    innerRenderAttributeNodes(curEntityId, refAttrName, childTreeNodeWrap, refPath);
+                }
+            }
+        }
+        else {
+            jslog(util.format('entity {0} fields selector toggle handler failed', entity.id));
+        }
+    }
+
+    function unfoldHandler(e) {
+        //jslog('************ unfold ****************')
+        var target = e.currentTarget; // the element that the event listener is attached to (element in `element.addEventListener`)
+        var compositeId = target.getAttribute('data-id') || ''
+        var entityId = compositeId.split(':')[0]
+
+        treeviewSelector.wrap.setAttribute('data-id', util.format('{0}:{1}', TABLE_REF_PREFIX, entityId));
+        treeviewSelector.wrap.setAttribute('data-ref-attr', util.format('{0}:{1}', TABLE_REF_PREFIX, compositeId));
+
+        if (compositeId) {
+
+            var attr = service.getAttributeByCompositeId(compositeId)
+
+            if (attr && attr.name) {
+                elements.fieldConfirmBtn.onclick = fieldSelectorModifyConfirmHandler
+                referenceAttrCheckHandler(attr)
+            } else {
+                jslog('unfoldHandler failed, invalid attribute')
+            }
+
+        } else {
+            jslog('unfoldHandler failed, no compositeId found')
+        }
+    }
+
+    //#endregion
+
+    //#region - inner tools
+
+    function setTotalAttrCount() {
+        if (elements.totalAttrCounter) {
+			var attrs = service.getAllAttributes().filter(function(item){return (item.datatype!='related_tags'&&item.datatype!='sys_class_name'&&item.datatype!='glide_date_time'&&item.datatype!='domain_path'&&item.datatype!='glide_date'&&item.datatype!='password'&&item.datatype!='user_image')});/*((item)=>{return item.datatype!='related_tags'&&item.datatype!='sys_class_name'&&item.datatype!='glide_date_time'&&item.datatype!='domain_path'&&item.datatype!='glide_date'&&item.datatype!='password'&&item.datatype!='user_image'});*/			
+           elements.totalAttrCounter.textContent = attrs.length;}
+        else {
+            jslog('setTotalAttrCount failed, element not found.');
+        }
+    }
+
+    function setSelectedAttrCount() {
+        if (elements.selectedAttrCounter) {
+
+            var attrs = service.getWillEnforcedAttributes();
+            attrs = attrs.concat(service.getEnforcedRefAttributesByEntityId(SYS_USER_TABLE));
+
+            elements.selectedAttrCounter.textContent = attrs.length;
+        }
+        else {
+            jslog('setSelectedAttrCount failed, element not found.');
+        }
+    }
+
+    function alphaAscendSorter(a, b) {
+
+        if (a.toString && b.toString) {
+            a = a.toString();
+            b = b.toString();
+        }
+
+        if (typeof a === 'string' && typeof b === 'string') {
+            var a = a.toLowerCase();
+            var b = b.toLowerCase();
+
+            if (a > b) {
+                return 1;
+            }
+            else if (a < b) {
+                return -1;
+            }
+            else {
+                return 0;
+            }
+        }
+        else {
+            jslog('alphaAscendSorter failed, only string types are allowed to be sorted.');
+            return 0;
+        }
+    }
+
+    function alphaDescendSorter(a, b) {
+
+        if (a.toString && b.toString) {
+            a = a.toString();
+            b = b.toString();
+        }
+
+        if (typeof a === 'string' && typeof b === 'string') {
+            var a = a.toLowerCase();
+            var b = b.toLowerCase();
+
+            if (a > b) {
+                return -1;
+            }
+            else if (a < b) {
+                return 1;
+            }
+            else {
+                return 0;
+            }
+        }
+        else {
+            jslog('alphaDescendSorter failed, only string types are allowed to be sorted.');
+            return 0;
+        }
+    }
+
+    /**
+     * @param {HTMLElement} element 
+     * @return {boolean}
+     */
+    function isLeafNode(element) {
+
+        var isLeaf = true;
+
+        if (element) {
+
+            if (!element.classList.contains('tree-node-content') || !element.title) {
+                isLeaf = false;
+            }
+
+        }
+        else {
+            isLeaf = false;
+        }
+
+        return isLeaf;
+    }
+
+    /**
+     * @param {HTMLElement} element 
+     * @return {boolean}
+     */
+    function isLeafChecked(element) {
+
+        var isChecked = false;
+        var checkboxSelector = 'input[type=checkbox]';
+        var checkboxEl = $(checkboxSelector, element);
+
+        isChecked = checkboxEl.checked;
+
+        return isChecked;
+    }
+
+    /**
+      * @param {HTMLElement} element 
+      * @return {boolean}
+    */
+    function isLeafCheckedPrev(namePath, curLeafName) {
+
+        if (namePath.indexOf('.') === 0) {
+            namePath = namePath.slice(1)
+        }
+
+        namePath = util.format('{0}.{1}', namePath, curLeafName).replace(/\./gi, '-')
+
+        var entityId = treeviewSelector.wrap.getAttribute('data-id').split(':')[1]
+        var compositeId = util.format('{0}:{1}', entityId, namePath)
+        var refAttr = service.getEnforcedRefAttributeByCompositeId(compositeId)
+
+        return (refAttr && refAttr.willEnforced);
+    }
+
+    /**
+     * @param {HTMLElement} element 
+     * @return {{ name: string, displayName: string }}
+     */
+    function getAttributeNamesFromLeaf(element) {
+
+        var attrName = '';
+        var attrDisplayName = '';
+        var checkboxSelector = 'input[type=checkbox]';
+        var checkboxEl = $(checkboxSelector, element);
+
+        attrName = checkboxEl.id.split(':')[2];
+        attrDisplayName = checkboxEl.getAttribute('data-ref-attr-displayname');
+
+        return {
+            name: attrName,
+            displayName: attrDisplayName
+        };
+    }
+
+    /**
+     * @param {HTMLElement} element 
+     * @return {{ name: string, displayName: string }}
+     */
+    function getAttributeNamesFromBranch(element) {
+
+        var attrName = '';
+        var attrDisplayName = '';
+        var contentSelector = 'div[class=tree-node-content]:first-child';
+        var contentNode = $(contentSelector, element);
+
+        if (contentNode) {
+            attrName = contentNode.getAttribute('data-ref-attr');
+            attrDisplayName = contentNode.getAttribute('data-ref-attr-displayname');
+        }
+        else {
+            jslog('getAttributeNameFromBranch failed, no table content node found.');
+        }
+
+        return {
+            name: attrName,
+            displayName: attrDisplayName
+        };
+    }
+
+    /**
+     * @param {HTMLElement} root
+     * @return {SE.APIModel.NxlEnforcedAttribute[]} 
+     */
+    function getCheckedAttributeNames(root) {
+
+        var attrNames = [];
+        var pathName = '';
+        var pathDisplayName = '';
+
+        var dfs = function (namePath, displayNamePath, node) {
+
+            if (node) {
+                if (isLeafNode(node)) {
+                    if (isLeafChecked(node)) {
+                        var leafNames = getAttributeNamesFromLeaf(node);
+                        var rawCompositeId = node.title || '';
+                        var compositeId = rawCompositeId.replace('.', ':');
+                        var attr = service.getAttributeByCompositeId(compositeId);
+
+                        //remove first empty dot
+                        if (namePath.indexOf('.') === 0) {
+                            namePath = namePath.slice(1);
+                        }
+
+                        if (displayNamePath.indexOf('.') === 0) {
+                            displayNamePath = displayNamePath.slice(1);
+                        }
+
+                        attrNames.push({
+                            column_id: util.format('{0}.{1}', namePath, leafNames.name),
+                            column_name: util.format('{0}.{1}', namePath, leafNames.name),
+                            column_label: util.format('{0}."{1}"', displayNamePath, leafNames.displayName),
+                            active: true,
+                            is_reference: true,
+                            type: attr.datatype
+                        });
+                    }
+                }
+                else {
+
+                    var refAttrNames = getAttributeNamesFromBranch(node);
+                    namePath = util.format('{0}.{1}', namePath, refAttrNames.name);
+                    //namePath = namePath.length === refAttrNames.name.length + 1 ? namePath.slice(1) : namePath;
+                    displayNamePath = util.format('{0}."{1}"', displayNamePath, refAttrNames.displayName);
+                    //displayNamePath = displayNamePath.length === refAttrNames.displayName.length + 1 ? displayNamePath.slice(1) : displayNamePath;          
+
+                    var contentNode = node.firstElementChild;
+                    var childNodesWrap = contentNode.nextElementSibling;
+                    var curNode = childNodesWrap.firstElementChild;
+
+                    while (curNode) {
+                        dfs(namePath, displayNamePath, curNode);
+                        curNode = curNode.nextElementSibling;
+                    }
+                }
+            }
+        }
+
+        var curChildNode = root.firstElementChild;
+
+        while (curChildNode) {
+
+            dfs(pathName, pathDisplayName, curChildNode);
+            curChildNode = curChildNode.nextElementSibling;
+        }
+
+        return replaceDotWithHyphen(attrNames);
+    }
+
+    /**
+     * @param {HTMLElement} root
+     * @return {SE.APIModel.NxlEnforcedAttribute[]} 
+     */
+    function getChangedAttributeNames(root) {
+
+        var attrNames = [];
+        var pathName = '';
+        var pathDisplayName = '';
+
+        var dfs = function (namePath, displayNamePath, node) {
+
+            if (node) {
+                if (isLeafNode(node)) {
+
+                    var leafNames = getAttributeNamesFromLeaf(node);
+                    var rawCompositeId = node.title || '';
+                    var compositeId = rawCompositeId.replace('.', ':');
+                    var attr = service.getAttributeByCompositeId(compositeId);
+
+                    if (isLeafChecked(node)) {
+
+                        //remove first empty dot
+                        if (namePath.indexOf('.') === 0) {
+                            namePath = namePath.slice(1);
+                        }
+
+                        if (displayNamePath.indexOf('.') === 0) {
+                            displayNamePath = displayNamePath.slice(1);
+                        }
+
+                        attrNames.push({
+                            column_id: util.format('{0}.{1}', namePath, leafNames.name),
+                            column_name: util.format('{0}.{1}', namePath, leafNames.name),
+                            column_label: util.format('{0}."{1}"', displayNamePath, leafNames.displayName),
+                            active: true,
+                            is_reference: true,
+                            type: attr.datatype
+                        });
+                    } else if (isLeafCheckedPrev(namePath, leafNames.name)) {
+
+                        //remove first empty dot
+                        if (namePath.indexOf('.') === 0) {
+                            namePath = namePath.slice(1);
+                        }
+
+                        if (displayNamePath.indexOf('.') === 0) {
+                            displayNamePath = displayNamePath.slice(1);
+                        }
+
+                        attrNames.push({
+                            column_id: util.format('{0}.{1}', namePath, leafNames.name),
+                            column_name: util.format('{0}.{1}', namePath, leafNames.name),
+                            column_label: util.format('{0}."{1}"', displayNamePath, leafNames.displayName),
+                            active: false,
+                            is_reference: true,
+                            type: attr.datatype,
+                        });
+                    }
+                }
+                else {
+
+                    var refAttrNames = getAttributeNamesFromBranch(node);
+                    namePath = util.format('{0}.{1}', namePath, refAttrNames.name);
+                    //namePath = namePath.length === refAttrNames.name.length + 1 ? namePath.slice(1) : namePath;
+                    displayNamePath = util.format('{0}."{1}"', displayNamePath, refAttrNames.displayName);
+                    //displayNamePath = displayNamePath.length === refAttrNames.displayName.length + 1 ? displayNamePath.slice(1) : displayNamePath;          
+
+                    var contentNode = node.firstElementChild;
+                    var childNodesWrap = contentNode.nextElementSibling;
+                    var curNode = childNodesWrap.firstElementChild;
+
+                    while (curNode) {
+                        dfs(namePath, displayNamePath, curNode);
+                        curNode = curNode.nextElementSibling;
+                    }
+                }
+            }
+        }
+
+        var curChildNode = root.firstElementChild;
+
+        while (curChildNode) {
+
+            dfs(pathName, pathDisplayName, curChildNode);
+            curChildNode = curChildNode.nextElementSibling;
+        }
+
+        return replaceDotWithHyphen(attrNames);
+    }
+
+    /**
+     * 
+     * @param {SE.APIModel.NxlEnforcedAttribute[]} attrs 
+     */
+    function replaceDotWithHyphen(attrs) {
+
+        var reg = /\./gi;
+
+        return attrs.map(function (attr) {
+            return _extend({}, attr, {
+                column_id: attr.column_id.replace(reg, '-'),
+                column_name: attr.column_name.replace(reg, '-'),
+                column_label: attr.column_label.replace(reg, '-'),
+            })
+        })
+    }
+
+    /**
+     * 
+     * @param {string} compositeId 
+     * @return {HTMLElement}
+     */
+    function getRefAttributeTableCell(compositeId) {
+
+        var inputEl = $(util.format('input[id="{0}"]', compositeId));
+        var tableRowEl = inputEl ? inputEl.parentElement.parentElement : null;
+
+        return tableRowEl ? tableRowEl.lastElementChild : null;
+    }
+
+    /**
+     * @param {SE.ViewModel.Attribute} attr 
+     * @return {boolean}
+     */
+    function isRefAttribute(attr) {
+        return attr.datatype === 'reference';
+    }
+
+    //#endregion
+
+    //#region - ui rendering
+
+    /**
+     * @param {SE.ViewModel.Attribute} attr 
+     */
+    function renderAttrTableRow(attr) {
+
+        var compositeId = util.format('{0}:{1}', attr.table, attr.id);
+
+        var el = createDOM(
+            '<tr>' +
+            '<td class="td-sm td-pad">' +
+            util.format('<input id="{0}" type="checkbox" class="checkbox hide" checked="{0}"/>', compositeId) +
+            util.format('<label for="{0}" class="box"></label>', compositeId) +
+            '</td>' +
+            util.format('<td class="td-lg bg-gray-light"><span class="entity-display-name font-default font-md">{0}</span></td>', attr.displayName) +
+            util.format('<td class="td-lg"><span class="font-default font-md">{0}</span></td>', attr.id) +
+            util.format('<td class="td-lg bg-gray-light"><span class="font-default font-md">{0}</span></td>', attr.datatype) + //            util.format('<td class="td-lg"><span class="font-default font-md">{0}</span></td>', attr.active) +            
+            util.format('<td class="td-lg"><span class="font-default font-md">{0}</span></td>', '') +
+            '</tr>'
+        );
+
+        var inputEl = $('input[type="checkbox"]', el);
+        inputEl.checked = attr.willEnforced;
+        inputEl.onclick = attrCheckHandler;
+
+        return el;
+    }
+
+    /**
+     * 
+     * @param {SE.ViewModel.Attribute} attr 
+     */
+    function renderRefAttrTableRow(attr) {
+
+        var compositeId = util.format('{0}:{1}', attr.table, attr.id);
+        var enforcedRefAttrs = service.getEnforcedRefAttributesByCompositeId(compositeId);
+        var refAttrHtmlFrag = '';
+
+        refAttrHtmlFrag = enforcedRefAttrs.map(function (attr) { return renderRefAttributes(attr).outerHTML }).join('');
+
+        var el = createDOM(
+            '<tr>' +
+            '<td class="td-sm td-pad">' +
+            util.format('<input id="{0}" type="checkbox" class="checkbox hide" checked="{0}"/>', compositeId) +
+            util.format('<label for="{0}" class="box"></label>', compositeId) +
+            util.format(
+                '<div class="btn unfolder-wrap unfolder-wrap-attr {0}" data-id="{1}"><i class="unfolder"></i></div>',
+                enforcedRefAttrs.length ? '' : 'hide',
+                util.format('{0}:{1}', attr.table, attr.id)
+            ) +
+            '</td>' +
+            util.format('<td class="td-lg bg-gray-light"><span class="entity-display-name font-default font-md">{0}</span></td>', attr.displayName) +
+            util.format('<td class="td-lg"><span class="font-default font-md">{0}</span></td>', attr.id) +
+            util.format('<td class="td-lg bg-gray-light"><span class="font-default font-md">{0}</span></td>', attr.datatype) + //            util.format('<td class="td-lg"><span class="font-default font-md">{0}</span></td>', attr.active) +            
+            util.format('<td class="td-lg"><span class="font-default font-md">{0}</span></td>', refAttrHtmlFrag) +
+            '</tr>'
+        );
+
+        var inputEl = $('input[type="checkbox"]', el);
+        var unfoldEl = $('.unfolder-wrap', el);
+
+        inputEl.onclick = attrCheckHandler;
+        unfoldEl.onclick = unfoldHandler;
+
+        if (enforcedRefAttrs.length) {
+            inputEl.checked = true;
+        } else {
+            inputEl.checked = false;
+        }
+
+        return el;
+    }
+
+    /**
+     * @param {SE.ViewModel.Attribute[]} attrs
+     */
+    function renderAttrTable(attrs) {
+
+        if (elements.tableBody) {
+            if (Array.isArray(attrs)) {
+                attrs.forEach(function (attr) {
+                    var rowEl = null;
+
+                    if (attr.datatype === 'reference') {
+                        rowEl = renderRefAttrTableRow(attr)
+                    } else {
+                        rowEl = renderAttrTableRow(attr)
+                    }
+
+                    elements.tableBody.appendChild(rowEl);
+                    
+                    var checkbox = $(util.format('input[id="{0}:{1}"]', attr.table, attr.id), rowEl);
+
+                    if (checkbox) {
+                        elementMaps.table[attr.id] = checkbox;
+                    }
+                });
+            }
+            else {
+                jslog('renderAttrTable failed, invalid attributes');
+            }
+        }
+        else {
+            jslog('renderAttrTable failed, element tableBody not found');
+        }
+    }
+
+    /**
+     * @param {string} entityId
+     * @param {string} refAttrName
+     * @param {string} refAttrDisplayName
+     * @return {HTMLElement}
+     */
+    function renderTableNode(entityId, refAttrName, refAttrDisplayName, refPath) {
+
+        var treeNode = createDOM('<div class="tree-node"></div>');
+        var tableNode = renderTableContentNode(entityId, refAttrName, refAttrDisplayName, refPath);
+        var fieldNodesWrap = createDOM('<div class="child-tree-node"></div>');
+
+        treeNode.appendChild(tableNode);
+        treeNode.appendChild(fieldNodesWrap);
+
+        return treeNode;
+    }
+
+    /**
+     * @param {string} entityId
+     * @param {string} refAttrName
+     * @param {string} refAttrDisplayName
+     * @return {HTMLElement}
+     */
+    function renderTableContentNode(entityId, refAttrName, refAttrDisplayName, refPath) {
+
+        var dataPath = refPath ? util.format('{0}-{1}', refPath, refAttrName) : refAttrName;
+        var wrap = createDOM(util.format('<div class="tree-node-content" data-ref-attr="{0}" data-ref-attr-displayname="{1}" data-path="{2}"></div>', refAttrName, refAttrDisplayName, dataPath));
+        var toggleBtn = createDOM(util.format('<i class="box btn attr-toggle-icon" data-table="{0}" data-expand="false">+</i>', entityId));
+        var tableName = createDOM(util.format('<span class="table-name font-bold">{0}</span>', refAttrDisplayName))
+
+        toggleBtn.onclick = toggleTreeNodeHandler;
+        wrap.appendChild(toggleBtn);
+        wrap.appendChild(tableName);
+
+        return wrap;
+    }
+
+    /**
+     * @param {SE.ViewModel.Attribute} attr 
+     * @param {string} entityId
+     * @return {HTMLElement}
+     */
+    function renderLeafNode(attr, entityId, refAttrName, refPath) {
+
+        if (!attr) {
+            throw new Error('renderLeafNode failed, invalid attribute');
+        }
+
+        var baseRefAttrCompositeId = treeviewSelector.wrap.getAttribute('data-ref-attr').slice(TABLE_REF_PREFIX.length + 1);
+        var enforcedRefAttributes = service.getEnforcedRefAttributesByCompositeId(baseRefAttrCompositeId);
+        var curRefPath = util.format('{0}-{1}', refPath, attr.name);
+        var isEnforcedBefore = enforcedRefAttributes.filter(function (a) { return a.name === curRefPath }).length ? true : false
+        var compositeId = util.format('{0}:{1}:{2}', TREEVIEW_ATTR_PREFIX + (++TREE_NODE_ID).toString(), refAttrName, attr.name);
+        var wrap = createDOM(util.format('<div class="tree-node-content" title="{0}"></div>', entityId + '.' + attr.name));
+        var checkboxWrap = createDOM('<div class="box checkbox-sm-wrap"></div>');
+        var checkboxInput = createDOM(util.format('<input id="{0}" type="checkbox" class="checkbox-sm hide" data-ref-attr-displayname="{1}" {2}/>', compositeId, attr.displayName, isEnforcedBefore ? 'checked' : ''));
+        var checkboxLabel = createDOM(util.format('<label for="{0}" class="box"></label>', compositeId));
+        var attrNameEl = createDOM(util.format('<span class="field-name">{0}</span>', attr.displayName));
+
+        wrap.appendChild(checkboxWrap);
+        wrap.appendChild(attrNameEl);
+
+        checkboxWrap.appendChild(checkboxInput);
+        checkboxWrap.appendChild(checkboxLabel);
+
+        return wrap;
+    }
+
+    /**
+     * 
+     * @param {SE.Tables.Attribute} attr 
+     */
+    function renderRefAttributes(attr) {
+        return createDOM(util.format('<p class="font-sm" title={0}>{1}</p>', attr.name, attr.displayName));
+    }
+
+    function innerRenderAttributeNodes(entityId, refAttrName, wrap, refPath) {
+
+        if (!entityId || !wrap) {
+            jslog('innerRenderAttributeNodes failed');
+            return;
+        }
+
+        var attrs = service.getAttributesByEntityId(entityId);
+		//  filter datatype
+        var filteredAttrs = attrs.filter(function(item){return (item.datatype!='related_tags'&&item.datatype!='sys_class_name'&&item.datatype!='glide_date_time'&&item.datatype!='domain_path'&&item.datatype!='glide_date'&&item.datatype!='password'&&item.datatype!='user_image')});
+        if (Array.isArray(filteredAttrs)) {
+            filteredAttrs.forEach(function (attr) {
+                if (attr.datatype === 'reference') {
+                    wrap.appendChild(renderTableNode(attr.referenceTable, attr.name, attr.displayName, refPath));
+                }
+                else {
+                    wrap.appendChild(renderLeafNode(attr, entityId, refAttrName, refPath));
+                }
+            });
+        }
+        else {
+            var errorMsg = util.format('innerRenderAttributeNodes -> get entity: {0} meta attributes failed', entityId);
+
+            jslog(errorMsg);
+            //alert(errorMsg);
+        }
+    }
+
+    function updateRefAttrTableCell(compositeId) {
+
+        var td = getRefAttributeTableCell(compositeId);
+
+        if (td) {
+
+            td.textContent = '';
+
+            var refAttrs = service.getEnforcedRefAttributesByCompositeId(compositeId);
+            var refAttrCell = refAttrs.map(function (attr) {
+                return renderRefAttributes(attr);
+            });
+
+            refAttrCell.forEach(function (el) {
+                td.appendChild(el);
+            });
+        }
+        else {
+            jslog(util.format('updateRefAttrTableCell failed, compositeId: {0}', compositeId));
+        }
+    }
+
+    //#endregion
+
+    //#region - hydrators
+
+    /**
+     * store entity model in the tables
+     * @param {SE.APIModel.NxlMetaEntity} model
+     */
+    function entityHydrator(model) {
+
+        if (model) {
+
+            var entity = {
+                id: model.internal_name,
+                name: model.internal_name,
+                displayName: model.display_name,
+                description: '',
+                scope: model.scope_name
+            };
+
+            store.entityInfo[entity.id] = entity;
+        }
+        else {
+            jslog('nxlMetaEntityHydrator failed, model invalid');
+        }
+    }
+
+    /**
+     * store attribute model in the tables
+     * @param {{ name: string, display: string, type: string, active: boolean, mandatory: boolean }} model 
+     */
+    function enforcedAttributeHydrator(model, entityId) {
+        if (model) {
+
+            var enforcer = {
+                id: attr.name,
+                enforced: !!model.active,
+                willEnforced: !!model.active
+            };
+            var compositeId = util.format('{0}:{1}', entityId, attr.id);
+
+            store.attrEnforcer[compositeId] = enforcer;
+        }
+        else {
+            jslog('enforcedAttributeHydrator failed, model is null');
+        }
+    }
+
+    function attrEnforcerHydrator(compositeId, isEnforced) {
+
+        var attrId = compositeId.split(':')[1];
+
+        var enforcer = {
+            id: attrId,
+            enforced: isEnforced,
+            willEnforced: isEnforced
+        };
+
+        store.attrEnforcer[compositeId] = enforcer;
+    }
+
+    /**
+     * @param {SE.APIModel.NxlEnforcedAttribute} model 
+     * @param {string} entityId 
+     */
+    function refAttributeHydrator(model, entityId) {
+        if (model && entityId) {
+
+            var compositeId = util.format('{0}:{1}', entityId, model.column_name);
+            var attr = {
+                id: model.column_name,
+                name: model.column_name,
+                displayName: model.column_label,
+                description: '',
+                datatype: model.type,
+                table: entityId,
+                isReference: model.is_reference
+            };
+
+            store.refAttrInfo[compositeId] = attr;
+        }
+        else {
+            jslog(util.format('refAttributeHydrator failed, model: {0}, entityId: {1}', model, entityId))
+        }
+    }
+
+    function refAttrEnforcerHydrator(compositeId, isEnforced) {
+
+        var attrId = compositeId.split(':')[1];
+
+        var enforcer = {
+            id: attrId,
+            enforced: isEnforced,
+            willEnforced: isEnforced
+        };
+
+        store.refAttrEnforcer[compositeId] = enforcer;
+    }
+
+    function entityAttrFetchStatusHydrator(entityId, isFetched) {
+
+        var attrFetchStatus = {
+            id: entityId,
+            isFetched: isFetched,
+        };
+
+        store.entityAttrFetchStatus[entityId] = attrFetchStatus;
+    }
+
+    /**
+     * 
+     * @param {SE.APIModel.SNMetaAttriute} model 
+     * @param {string} entityId
+     */
+    function snMetaAttributeHydrator(model, entityId) {
+
+        if (model && entityId) {
+
+            var attr = {
+                id: model.value.slice(entityId.length + 1),
+                name: model.value.slice(entityId.length + 1),
+                displayName: model.label,
+                description: model.title,
+                datatype: model.type,
+                table: entityId,
+                referenceTable: model.reference,
+                isReference: false
+            };
+
+            var compositeId = util.format('{0}:{1}', entityId, attr.id);
+
+            store.attrInfo[compositeId] = attr;
+        }
+        else {
+            jslog('snMetaAttributeHydrator failed, model invalid');
+        }
+    }
+
+    //#endregion
+
+    //#region - dehydrator
+
+    /**
+     * 
+     * @param {SE.ViewModel.Attribute} attr 
+     * @return {SE.APIModel.NxlEnforcedAttribute}
+     */
+    function attributeDehydrator(attr) {
+
+        var model = {};
+
+        model.column_id = attr.id;
+        model.column_name = attr.id;
+        model.column_label = attr.displayName;
+        model.type = attr.datatype;
+        model.active = attr.willEnforced;
+        model.is_reference = !!attr.isReference;
+
+        return model;
+    }
+
+    //#endregion
+})();]]></script>
+        <script_name>user-attributes</script_name>
+        <sys_class_name>sys_ui_script</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-15 06:51:52</sys_created_on>
+        <sys_id>43b46bb74f1207003ab4e9628110c7aa</sys_id>
+        <sys_mod_count>65</sys_mod_count>
+        <sys_name>x_230565_emsn.user-attributes</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ui_script_43b46bb74f1207003ab4e9628110c7aa</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-03-29 10:19:50</sys_updated_on>
+        <use_scoped_format>false</use_scoped_format>
+    </sys_ui_script>
+</record_update>

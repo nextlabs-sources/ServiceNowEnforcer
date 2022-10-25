@@ -1,0 +1,787 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>public</access>
+        <active>true</active>
+        <api_name>x_230565_emsn.CommunicateWithCCAndPC</api_name>
+        <client_callable>false</client_callable>
+        <description>add user information format into json object</description>
+        <name>CommunicateWithCCAndPC</name>
+        <script><![CDATA[var AttributeNode = Class.create();
+AttributeNode.prototype ={
+    initialize: function(){ 
+		this.AttributeId = null;
+		this.Value = null;
+		this.DataType = null;
+		this.IncludeInResult = null;
+	},
+	GetAttributeId:function() {  return this.AttributeId; },
+	SetAttributeId:function(TempAttributeId){ this.AttributeId = TempAttributeId; },
+	GetValue:function(){ return this.Value; },
+	SetValue:function(TempValue) { this.Value = TempValue; },
+	GetDataType:function() { return this.DataType; },
+	SetDataType:function(TempDataType) { this.DataType = TempDataType; },
+	GetIncludeInResult:function() { return this.IncludeInResult; },
+	SetIncludeInResult:function(TempIncludeInResult) { this.IncludeInResult = TempIncludeInResult; },
+	type: 'AttributeNode'
+};
+
+var XACML = {
+    Subject_Access_Subject : "urn:oasis:names:tc:xacml:1.0:subject-category:access-subject",
+	Subject_Subejct_Id : "urn:oasis:names:tc:xacml:1.0:subject:subject-id",
+	Subject_Subject_Name : "urn:oasis:names:tc:xacml:1.0:subject:name",
+	Subject_Prefix : "urn:oasis:names:tc:xacml:1.0:subject:",
+
+	//public const string MycustomAttr_environment_MyCustomAttr = "attribute-category:environment-MyCustomAttr";
+	//public const string 
+
+	Host_Host : "urn:nextlabs:names:evalsvc:1.0:attribute-category:host",
+	Host_Inet_Address : "urn:nextlabs:names:evalsvc:1.0:host:inet_address",
+	Host_Name : "urn:nextlabs:names:evalsvc:1.0:host:name",
+	Host_Prefix : "urn:nextlabs:names:evalsvc:1.0:host:",
+
+	Recipient_Recipient_Subject : "urn:oasis:names:tc:xacml:1.0:subject-category:recipient-subject",
+	Recipient_Id : "urn:nextlabs:names:evalsvc:1.0:recipient:id",
+	Recipient_Name : "urn:nextlabs:names:evalsvc:1.0:recipient::name",
+	Recipient_Prefix : "urn:nextlabs:names:evalsvc:1.0:recipient:",
+	Recipient_Email : "urn:nextlabs:names:evalsvc:1.0:recipient:email",
+
+	Resource : "urn:oasis:names:tc:xacml:3.0:attribute-category:resource",
+	Resource_Resource_Id : "urn:oasis:names:tc:xacml:1.0:resource:resource-id",
+	Resource_Resource_Type : "urn:nextlabs:names:evalsvc:1.0:resource:resource-type",
+	Resource_Resource_Dimension : "urn:nextlabs:names:evalsvc:1.0:resource:resource-dimension",
+	Resource_Dimension_From : "from",
+	Resource_Dimension_To : "to",
+	Resource_Prefix : "urn:nextlabs:names:evalsvc:1.0:resource:",
+
+	Action : "urn:oasis:names:tc:xacml:3.0:attribute-category:action",
+	Action_Action_Id : "urn:oasis:names:tc:xacml:1.0:action:action-id",
+
+	Application : "urn:nextlabs:names:evalsvc:1.0:attribute-category:application",
+	Application_Application_Id : "urn:nextlabs:names:evalsvc:1.0:application:application-id",
+	Application_Application_Name : "urn:nextlabs:names:evalsvc:1.0:application:name",
+	Application_Application_Url : "urn:nextlabs:names:evalsvc:1.0:application:url",
+	Application_Application_Prefix : "urn:nextlabs:names:evalsvc:1.0:application:application:",
+
+	Environment : "urn:oasis:names:tc:xacml:3.0:attribute-category:environment",
+	DontCareAcceptableId: "urn:oasis:names:tc:xacml:1.0:environment:dont-care-acceptable",
+	Enviroment_Prefix : "urn:oasis:names:tc:xacml:1.0:environment:",
+};
+
+//enumerate attribute type
+var CEAttributeType = {
+	XACML_String:"http://www.w3.org/2001/XMLSchema#string",
+	XACML_Boolean:"http://www.w3.org/2001/XMLSchema#boolean",
+	XACML_Integer:"http://www.w3.org/2001/XMLSchema#integer",
+	XACML_Double:"http://www.w3.org/2001/XMLSchema#double",
+	XACML_Time:"http://www.w3.org/2001/XMLSchema#time",
+	XACML_Date:"http://www.w3.org/2001/XMLSchema#date",
+	XACML_DateTime:"http://www.w3.org/2001/XMLSchema#dateTime",
+	XACML_DayTimeDuration:"http://www.w3.org/2001/XMLSchema#dayTimeDuration",
+	XACML_YearMonthDuration:"http://www.w3.org/2001/XMLSchema#yearMonthDuration",
+	XACML_AnyURI:"http://www.w3.org/2001/XMLSchema#anyURI",
+	XACML_HexBinary:"http://www.w3.org/2001/XMLSchema#hexBinary",
+	XACML_Base64Binary:"http://www.w3.org/2001/XMLSchema#base64Binary",
+	XACML_Rfc822Name:"urn:oasis:names:tc:xacml:1.0:data-type:rfc822Name",
+	XACML_X500Name:"urn:oasis:names:tc:xacml:1.0:data-type:x500Name",
+	XACML_IpAddress:"urn:oasis:names:tc:xacml:2.0:data-type:ipAddress",
+	XACML_DnsName:"urn:oasis:names:tc:xacml:2.0:data-type:dnsName",
+	XACML_XpathExpression:"urn:oasis:names:tc:xacml:3.0:data-type:xpathExpression",
+	NXL_List:"http://www.w3.org/2001/XMLSchema#string"
+};
+
+var RestResponseStatus =
+{
+	Status_Ok : "urn:oasis:names:tc:xacml:1.0:status:ok",
+	Status_MissAttributes : "urn:oasis:names:tc:xacml:1.0:status:missing-attribute"
+};
+
+var RestResponse = {
+	Deny : "deny",
+    Allow : "permit"
+ } ;
+
+var CEResponse = {
+	CEDeny : 0,
+	CEAllow : 1,
+	CEDontCare : -1
+};
+
+//attribute class[name,value,type]
+var CEAttribute = Class.create();
+CEAttribute.prototype = {
+	initialize: function(strName, strValue, ceAttributeType){
+		this.Name = strName;
+		this.Value = strValue;
+		this.Type = ceAttributeType;
+	},
+	type: 'CEAttribute'
+};
+
+//container that stores all attributes
+var CEAttres = Class.create();
+CEAttres.prototype = {
+	initialize: function(){
+		this.m_lisKeyValuePair = [];
+	},
+	Add_Attre:function(strName, strValue, ceAttributesType){
+		var pair = new CEAttribute(strName, strValue, ceAttributesType);
+		this.m_lisKeyValuePair.push(pair);
+	},
+	Get_Attre:function(nIndex){
+		var strName = null;
+		var strValue = null;
+		var ceAttributesType = CEAttributeType.XACML_String;
+		if (nIndex < this.m_lisKeyValuePair.length)
+		{
+			strName = this.m_lisKeyValuePair[nIndex].Name;
+			strValue = this.m_lisKeyValuePair[nIndex].Value;
+			ceAttributesType = this.m_lisKeyValuePair[nIndex].Type;
+			return {"Name":strName, "Value":strValue, "Type":ceAttributesType};
+		}
+	},
+	Get_Count:function()
+	{
+		return this.m_lisKeyValuePair.length;
+	},
+	type: 'CEAttres'
+};
+
+var CEUser = Class.create();
+CEUser.prototype = {
+	initialize:function(strSid, strName, attres){
+		this.Sid = strSid;//user sid
+		this.Name = strName;//user name
+		this.Attres = attres; //user attributes
+	},
+	type:'CEUser'
+};
+
+//pass user attributes key-value list to construct CEUser object
+//parameter format: {"email":{"type":"string",value:"zack.zhan@nextlabs.com"}, "name":{"type":"string","value":"zhanyang"}, "age":{"type":"int","value":26}}
+//attention:
+//sid cannot be email address as I have tested that we could use same email address to submit. sid shoud be userid
+var GetCEUser = function(json, strSid, strUserName){
+	var attres = new CEAttres();
+	for (var key1 in json){
+		var strName = key1;
+		var strValue = json[key1]["value"];
+		var ceAttributeType = json[key1]["type"];
+		attres.Add_Attre(strName, strValue, ceAttributeType);
+	}
+
+	var result = new CEUser(strSid, strUserName, attres);	
+	return result;
+};
+
+var CEResource = Class.create();
+CEResource.prototype = {
+	initialize:function(strName, strType, attres)
+	{
+		this.SourceName = strName;
+		this.SourceType = strType;
+		this.Attres = attres;
+	},
+	type:"CEResource"
+};
+
+var JPCRequest = Class.create();
+JPCRequest.prototype = {
+		initialize:function(){
+			this.strAction = null;
+			this.ceUser = null;
+			this.ceSource = null;
+			this.ceNameAttributes = null;
+		},
+	    Set_Action:function(strTmpAction){
+			this.strAction = strTmpAction;
+		},
+		Set_User:function(ceTmpUser){
+			this.ceUser = ceTmpUser;
+		},
+		Set_Source:function(ceTmpSource){
+			this.ceSource = ceTmpSource;
+		},
+		Set_NameAttributes:function(strTmpName, strTmpValue, ceTmpAttributeType){
+			if (this.ceNameAttributes == null){
+				this.ceNameAttributes = new CEAttres();
+			}
+			this.ceNameAttributes.Add_Attre(strTmpName, strTmpValue, ceTmpAttributeType);				
+		},
+		type: 'JPCRequest'
+}; 
+//pass an JPCRequest object, and transform it to a json string
+var TransformToSingleRequest = function(tmpjpcRequest){
+
+	var resJsonObject = new Object();
+	var requestJsonObject = new Object();
+	var bReturnPolicyIdList = true;
+	var catagory = [];
+	
+	//add user information to json request
+	var ceUser = tmpjpcRequest.ceUser;
+	if (ceUser != null)
+	{
+		var catagoryNode_ceUser = new Object();
+		catagoryNode_ceUser.CategoryId = XACML.Subject_Access_Subject;
+		catagoryNode_ceUser.Attribute = [];
+
+		if ((ceUser.Sid != null) && (ceUser.Sid.length != 0))
+		{
+			var attributeNode_sid = new Object();
+			attributeNode_sid.AttributeId = XACML.Subject_Subejct_Id;
+			// the attribute node.value is array
+			attributeNode_sid.Value = new Array();
+			attributeNode_sid.Value.push(ceUser.Sid);// = ceUser.Sid;
+			attributeNode_sid.IncludeInResult = false;
+			catagoryNode_ceUser.Attribute.push(attributeNode_sid);
+		}
+		if ((ceUser.Sid != null) && (ceUser.Name.length != 0))
+		{
+			var attributeNode_name = new Object();
+			attributeNode_name.AttributeId = XACML.Subject_Subject_Name;
+			attributeNode_name.Value = new Array();
+			attributeNode_name.Value.push(ceUser.Name);// = ceUser.Name;
+			attributeNode_name.DataType = CEAttributeType.XACML_String;
+			attributeNode_name.IncludeInResult = false;
+			catagoryNode_ceUser.Attribute.push(attributeNode_name);
+		}
+		if (ceUser.Attres != null)
+		{
+			for (var i = 0; i < ceUser.Attres.Get_Count(); i++)
+			{
+				var tmpAttre_ceUser = ceUser.Attres.Get_Attre(i);
+				if (tmpAttre_ceUser!=null && (tmpAttre_ceUser.Name.length != 0 && tmpAttre_ceUser.Value.length != 0))
+				{
+					//   add filter ,filter the user_password
+					if(tmpAttre_ceUser.Name =='user_password')
+						{
+							continue;
+						}
+					var attributeNode_other_ceUser = new Object();
+					attributeNode_other_ceUser.AttributeId =XACML.Subject_Prefix + tmpAttre_ceUser.Name;
+					attributeNode_other_ceUser.Value = new Array();
+					attributeNode_other_ceUser.Value.push(tmpAttre_ceUser.Value); //= tmpAttre_ceUser.Value;
+					attributeNode_other_ceUser.DataType = tmpAttre_ceUser.Type;
+					attributeNode_other_ceUser.IncludeInResult = false;
+					catagoryNode_ceUser.Attribute.push(attributeNode_other_ceUser);
+				}
+			}
+		}
+		catagory.push(catagoryNode_ceUser);
+	}
+	
+	//add resource to json request
+	var ceSource = tmpjpcRequest.ceSource;
+	if (ceSource != null)
+	{
+		var catagoryNode_ceSource = new Object();
+		catagoryNode_ceSource.CategoryId = XACML.Resource;
+		catagoryNode_ceSource.Attribute = [];
+		if ((ceSource.SourceName != null) && (ceSource.SourceName.length > 0))
+		{
+			var attributeNode_SourceName = new Object();
+			attributeNode_SourceName.AttributeId = XACML.Resource_Resource_Id;
+			attributeNode_SourceName.Value = new Array();
+			attributeNode_SourceName.Value.push(ceSource.SourceName); //= ceSource.SourceName;
+			attributeNode_SourceName.DataType = CEAttributeType.XACML_AnyURI;
+			attributeNode_SourceName.IncludeInResult = false;
+			catagoryNode_ceSource.Attribute.push(attributeNode_SourceName);
+		}
+		if ((ceSource.SourceType != null) && (ceSource.SourceType.length > 0))
+		{
+			var attributeNode_SourceType = new Object();
+			attributeNode_SourceType.AttributeId = XACML.Resource_Resource_Type;
+			attributeNode_SourceType.Value = new Array();
+			attributeNode_SourceType.Value.push(ceSource.SourceType); //= ceSource.SourceType;
+			attributeNode_SourceType.DataType = CEAttributeType.XACML_AnyURI;
+			attributeNode_SourceType.IncludeInResult = false;
+			catagoryNode_ceSource.Attribute.push(attributeNode_SourceType);
+		}
+		if (ceSource.Attres != null)
+		{
+			for (var j = 0; j < ceSource.Attres.Get_Count(); j++)
+			{
+				var tmpAttre_ceSource = ceSource.Attres.Get_Attre(j);
+				// if (tmpAttre_ceSource!=null && (tmpAttre_ceSource.Name.length != 0 && tmpAttre_ceSource.Value.length != 0))
+				if (tmpAttre_ceSource && tmpAttre_ceSource.Name && tmpAttre_ceSource.Value)
+				{
+					var attributeNode_other_ceSource = new Object();
+					attributeNode_other_ceSource.AttributeId =XACML.Resource_Prefix + tmpAttre_ceSource.Name;
+					attributeNode_other_ceSource.Value = new Array();
+					attributeNode_other_ceSource.Value.push(tmpAttre_ceSource.Value);// = tmpAttre_ceSource.Value;
+					attributeNode_other_ceSource.DataType = tmpAttre_ceSource.Type;
+					attributeNode_other_ceSource.IncludeInResult = false;
+					catagoryNode_ceSource.Attribute.push(attributeNode_other_ceSource);
+				}
+			}
+		}
+		catagory.push(catagoryNode_ceSource);
+	}
+	
+	var strAction = tmpjpcRequest.strAction;
+	if ((strAction != null) && (strAction.length>0))
+	{
+		var catagoryNode_strAction = new Object();
+		catagoryNode_strAction.CategoryId = XACML.Action;
+		catagoryNode_strAction.Attribute = [];
+		
+		var attributeNode_action = new Object();
+		attributeNode_action.AttributeId = XACML.Action_Action_Id;
+		attributeNode_action.Value = new Array();
+		attributeNode_action.Value.push(strAction);// = strAction;
+		attributeNode_action.DataType = CEAttributeType.XACML_String;
+		attributeNode_action.IncludeInResult = false;
+		catagoryNode_strAction.Attribute.push(attributeNode_action);
+		
+		catagory.push(catagoryNode_strAction);
+	}
+
+	//set default behavior if no policy matched.
+	if(Array.isArray(catagory)){
+
+		var envElement = {
+			"CategoryId": XACML.Environment,
+			"Attribute": [
+			  {
+				"AttributeId": XACML.DontCareAcceptableId,
+				"Value": ["yes"],
+				"DataType": CEAttributeType.XACML_String,
+				"IncludeInResult": false
+			  }
+			]
+		};
+
+		catagory.push(envElement);
+	}
+	// add hostElement,appElement
+	var ip = gs.getSession().getClientIP();
+	//var host = ip2int(ip).toString();
+	var hostElement = {
+		"CategoryId": XACML.Host_Host,
+			"Attribute": [
+			  {
+				"AttributeId": XACML.Host_Name,
+				"Value": [ip],
+				"DataType": CEAttributeType.XACML_String,
+				"IncludeInResult": false
+			  },
+			{
+				"AttributeId": XACML.Host_Inet_Address,
+				"Value": [ip],
+				"DataType": CEAttributeType.XACML_IpAddress,
+				"IncludeInResult": false
+			}
+			]
+	};
+    catagory.push(hostElement);
+	
+	var appElement = {
+		"CategoryId": XACML.Application,
+			"Attribute": [
+			  {
+				"AttributeId": XACML.Application_Application_Id,
+				"Value": ["EMSN"],
+				"DataType": CEAttributeType.XACML_String,
+				"IncludeInResult": false
+			  }
+			]
+	};
+	catagory.push(appElement);
+	
+	requestJsonObject.ReturnPolicyIdList = bReturnPolicyIdList;
+	requestJsonObject.Category = catagory;
+	resJsonObject.Request = requestJsonObject;
+	return resJsonObject;
+};
+
+var CheckResource = function(tmpjpcRequest)
+{
+	var httpClient = new CommunicateWithCCAndPC();
+	httpClient.pc_url = "http://www.nextlabs.solutions:58080/dpc/authorization/pdp";
+	var requestBody = JSON.stringify(TransformToSingleRequest(tmpjpcRequest));
+	var responseData = httpClient.GetObligation(requestBody);
+	var responseJsonBody = responseData.getBody();
+	//gs.debug(responseJsonBody);
+	var response = JSON.parse(responseJsonBody);
+	var resultLength = response["Response"]["Result"].length;
+	var results = response["Response"]["Result"];
+	var ceresponse = CEResponse.CEDontCare;
+	for(var i=0; i < resultLength; i++)
+	{
+		if (results[i]["Status"]["StatusCode"]["Value"] == RestResponseStatus.Status_Ok)
+		{
+			//parse obligation
+			var obligationes = results[i]["Obligations"];
+			for (var j=0; j<obligationes.length; j++)
+			{
+				var obligationID = obligationes[j]["Id"];
+				if (obligationID == "alert_msg")
+				{
+					//alert message obligation
+					var attributeAssignments = obligationes[j]["AttributeAssignment"];
+					for (var attribute_assignment in attributeAssignments)
+					{
+						var attribute_id = attributeAssignments[attribute_assignment].AttributeId;
+						if ((attribute_id!=null) && (attribute_id.toLowerCase() == "field1"))
+						{
+							//get alert message data
+							var attribute_value = attributeAssignments[attribute_assignment].Value[0];
+							gs.debug(attribute_value);
+							//gs.addErrorMessage(attribute_value);
+						}
+					}
+				}
+				else
+				{
+					//...
+				}
+			}
+			if (results[i]["Decision"].toLowerCase() == RestResponse.Deny)
+			{
+				ceresponse = CEResponse.CEDeny;
+			}
+			else if (results[i]["Decision"].toLowerCase() == RestResponse.Allow)
+			{
+				ceresponse = CEResponse.CEAllow;
+			}
+		}
+	}
+	return responseJsonBody;
+	/*
+	var headers = responseData.getAllHeaders();
+	for(var i in headers)
+	{
+		gs.debug(headers[i].name + ': ' + headers[i].value);
+	}
+	*/
+	/*
+	output headers:
+	Server: nginx/1.13.6 (sys.scripts extended logging)
+	Date: Fri, 27 Oct 2017 06:27:27 GMT (sys.scripts extended logging)
+	Content-Type: application/json;charset=ISO-8859-1 (sys.scripts extended logging)
+	Content-Length: 599 (sys.scripts extended logging)
+	Connection: keep-alive (sys.scripts extended logging)
+	*/
+};
+
+function XACMLItem(categoryId, id, ceAttrs) {
+	this.CategoryId = categoryId
+	this.Id = id
+	this.Attribute = ceAttrs.map(function(ceAttr) {
+		return {
+			AttributeId: ceAttr.Name,
+			Value: ceAttr.Value,
+			DataType: ceAttr.Type,
+			IncludeInResult: false,
+		}
+	})
+}
+
+var MultiJPCRequest = Class.create()
+MultiJPCRequest.prototype = {
+	initialize: function() {
+		this.actions = [];
+		this.users = [];
+		this.resources = [];
+		this.env = [];
+		this.orders = []
+	},
+	release: function() {
+		this.actions.length = 0
+		this.users.length = 0
+		this.resources.length = 0
+		this.resources.length = 0
+		this.env.length = 0
+		this.orders.length = 0
+	},
+	releaseUsers: function() {
+		this.users.length = 0
+	},
+	releaseOrders: function() {
+		this.orders.length = 0
+	},
+	addAction: function(actionName) {
+		if(!actionName) {
+			throw new Error('addAction failed, actionName invalid')
+		}
+		this.actions.push(actionName)
+	},
+	addUser: function(ceUser) {
+		if(!ceUser || !ceUser.Sid) {
+			throw new Error('addUser failed, ceUser invalid')
+		}
+		this.users.push(ceUser)
+	},
+	addResource: function(ceResource) {
+		if(!ceResource || !ceResource.SourceName) {
+			throw new Error('addResource failed, ceResource invalid')
+		}
+		this.resources.push(ceResource)
+	},
+	addEnv: function(ceEnv) {
+		if(!ceEnv) {
+			throw new Error('addEnv failed, ceEnv invalid')
+		}
+		this.env.push(ceEnv)
+	},
+	/**
+	 * set request order
+	 * 
+	 */
+	addOrder: function(subjectId, action, resource) {
+		if(!subjectId || !action || !resource) {
+			throw new Error('addOrder failed, invalid params')
+		}
+		this.orders.push({
+			id: subjectId,
+			action: action,
+			resource: resource,
+		})
+	},
+	getRequest: function() {
+		var req = {}
+
+		this.__init(req)
+		this.__initSubjects(req)
+		this.__initActions(req)
+		this.__initResources(req)
+		this.__initOrders(req)
+
+		return {
+			Request: req
+		}
+	},
+	toJSON: function() {
+		var result = ''
+		var _self = this
+		try {
+			result = JSON.stringify(_self.getRequest())
+		} catch(e) {
+			SEUtil.error('MultiJPCRequest.toJSON', e.message);			
+		}
+
+		return result
+	},
+
+	__init: function(req) {
+		if(!req) {
+			throw new Error('__init failed, request object is null')
+		}
+
+		req.CombinedDecision = false
+		req.ReturnPolicyIdList = false
+		req.XPathVersion = 'http://www.w3.org/TR/1999/REC-xpath-19991116'
+		// Expect default behavior (NotApplicable) response if no policy matched.
+		req.Category = [{
+			CategoryId: XACML.Environment,
+			Attribute: [
+			  {
+				AttributeId: XACML.DontCareAcceptableId,
+				Value: 'yes',
+				DataType: XACML.XACML_String,
+				IncludeInResult: false
+			  }
+			],
+			Id: 'environment' // @see #__initOrders it will be referenced.
+		}];
+		req.Subject = []
+		req.Action = []
+		req.Resource = []
+		req.MultiRequests = {
+			RequestReference: []
+		}
+	},
+
+	__initSubjects: function(req) {
+		this.users.forEach(function(ceUser) {
+			var subjectObj = new XACMLItem(XACML.Subject_Access_Subject, ceUser.Sid, ceUser.Attres.m_lisKeyValuePair)
+			req.Subject.push(subjectObj)
+		})
+	},
+
+	__initActions: function(req) {
+		this.actions.forEach(function(action) {
+			var actionObj = new XACMLItem(XACML.Action, action, [new CEAttribute(XACML.Action_Action_Id, action, CEAttributeType.XACML_String)])
+			req.Action.push(actionObj)
+		})
+	},
+
+	__initResources: function(req) {
+		this.resources.forEach(function(res) {
+			var resObj = new XACMLItem(XACML.Resource, res.SourceName, res.Attres.m_lisKeyValuePair)
+			req.Resource.push(resObj)
+		})
+	},
+
+	__initOrders: function(req) {
+		this.orders.forEach(function(order) {
+			req.MultiRequests.RequestReference.push({
+				ReferenceId: [order.id, order.action, order.resource, 'environment']
+			})
+		})
+	}
+}
+
+var CommunicateWithCCAndPC = Class.create();
+CommunicateWithCCAndPC.prototype = {
+    initialize: function(cc_url,client_id,secret,pc_url) {
+		this.cc_url = cc_url;
+		this.client_id = client_id;
+		this.secret = secret;
+		this.pc_url = pc_url;
+		this.access_token = null;
+		this.token_type = null;
+		this.expires_in = 0;
+    },
+	
+	//Init communication, get token from CC
+	Init:function(){
+		var msg = new sn_ws.RESTMessageV2();
+		msg.setEndpoint(this.cc_url);
+		msg.setHttpMethod("POST");
+		msg.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+		msg.setStringParameter("grant_type", "client_credentials");
+		msg.setStringParameter("client_id", this.clientId);
+		msg.setStringParameter("client_secret", this.secret);
+		var request_body = msg.getRequestBody();
+		gs.debug("-------------------");
+		gs.debug(request_body);
+		var response = msg.execute();
+		
+		//just assume that response is a json string
+		response = '{"access_token": "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjE1MDg3MjUwMjQsInN1YiI6ImFwaWNsaWVudCIsImlzcyI6Im5leHRsYWJzIn0.8UA-e4nt8Sz-OtJwhmJYqtmsmMOk2-JFGoOo5WeZM0w","token_type": "Bearer","expires_in": 1}';
+		
+		try{
+			var object = JSON.parse(response);
+			this.access_token = object["access_token"];
+			this.token_type = object["token_type"];
+			this.expires_in = object["expires_in"];
+			gs.debug("access token:" + this.access_token);
+			gs.debug("token type:" + this.token_type);
+			gs.debug("token expires in " + this.expires_in);
+		}
+		catch(e){
+			gs.error(e.message);
+		}
+			
+		//gs.debug("aaaaaaaa"+response.getBody());
+		//gs.debug(response.getErrorCode());
+		//gs.debug(response.getStatusCode());
+		//gs.debug("*******************");
+		return response;
+	},
+	
+	GetCC:function(){
+		//return "https://emcc.crm.nextlabs.solutions";
+		var host = SEUtil.getProperty('Host');
+		if (host) {
+			var hosts = SEUtil.buildCCAndJPCHosts(host);
+			host = 'https://' + hosts.cc;
+		}
+		 return host;	
+	},
+	
+	GetSearchPolicyAPI:function(){
+	    return this.GetCC() + "/console/api/v1/policy/search";
+},
+	GetQueryPolicyDetailAPI:function(){
+	 return this.GetCC() + "/console/api/v1/policy/mgmt/active/";
+},
+   GetQueryComponentDetailAPI:function(){
+	    return this.GetCC() + "/console/api/v1/component/mgmt/active/";
+   },
+	
+	//Send data to PC
+	GetObligation:function(request_data){
+		var msg = new sn_ws.RESTMessageV2();
+		msg.setEndpoint(this.pc_url);
+		msg.setHttpMethod("POST");
+		msg.setRequestHeader("Content-Type", "application/json");
+		msg.setRequestHeader("Service", "EVAL");
+		msg.setRequestHeader("Version", "1.0");
+		msg.setRequestHeader("Authorization", this.token+" "+this.access_token);
+		msg.setRequestBody(request_data);
+		var res = msg.executeAsync();
+		res.getBody();
+		return res;
+	},
+	
+    type: 'CommunicateWithCCAndPC'
+};
+CommunicateWithCCAndPC.getPc = GetPC
+function GetPC()
+{
+	var JPC_PATH = '/dpc/authorization/pdp';
+	var url = SEUtil.getProperty("PCHost");
+	var bHTTPS = SEUtil.getProperty("PCHttps");
+	var port = SEUtil.getProperty("PCPort");
+
+	var real_url;
+	var prefix;
+
+    var urlReg = /(https|http)?(?:\:\/\/)?([a-zA-Z0-9\-.]+)(?:\:)?(\d+)?(\/[a-zA-Z0-9.\-_~!$&'()*+,;=:@/%]+)?\??/i;
+	var matches = urlReg.exec(url);
+	var schema = matches[1];
+	var host = matches[2];
+	var path = matches[4];
+
+	gs.debug(bHTTPS);
+
+	if (bHTTPS === "true") {
+
+		if(port) {
+			real_url = 'https://' + host + ':' + port + JPC_PATH
+		} else {
+			real_url = 'https://' + host + JPC_PATH
+		}
+
+	} else {
+
+		if(port) {
+			real_url = 'http://' + host + ':' + port + JPC_PATH
+		} else {
+			real_url = 'http://' + host + JPC_PATH
+		}		
+
+	}
+
+	return real_url;
+};
+
+
+/*
+var attres = {"email":{"type":CEAttributeType.XACML_String,value:"zack.zhan@nextlabs.com"}, "name":{"type":CEAttributeType.XACML_String,"value":"zhanyang"}, "age":{"type":CEAttributeType.XACML_Integer,"value":26}};
+var ceUser = GetCEUser(attres, "test001", "test001");
+
+var jpcRequest = new JPCRequest();
+jpcRequest.Set_User(ceUser);
+
+var ceResourceAttres = new CEAttres();
+ceResourceAttres.Add_Attre("resource_attres_001", "resource_attres_value_001", "string");
+ceResourceAttres.Add_Attre("resource_attres_002", "resource_attres_value_002", "string");
+ceResourceAttres.Add_Attre("resource_attres_003", "resource_attres_value_003", "string");
+var ceResource = new CEResource("resource_001", "resource_value", ceResourceAttres );
+jpcRequest.Set_Source(ceResource );
+gs.debug("-------------------------------");
+gs.debug(ceResource.Attres.m_lisKeyValuePair.length);
+
+jpcRequest.Set_Action("EDIT");
+
+var resJsonString = TransformToSingleRequest(jpcRequest);
+*/
+]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-10-20 02:38:49</sys_created_on>
+        <sys_id>40e5a4a3db318300d2bf5d50cf96194a</sys_id>
+        <sys_mod_count>102</sys_mod_count>
+        <sys_name>CommunicateWithCCAndPC</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_script_include_40e5a4a3db318300d2bf5d50cf96194a</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-04-19 02:57:40</sys_updated_on>
+    </sys_script_include>
+</record_update>

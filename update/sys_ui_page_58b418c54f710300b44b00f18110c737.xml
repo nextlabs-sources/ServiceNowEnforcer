@@ -1,0 +1,414 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ui_page">
+    <sys_ui_page action="INSERT_OR_UPDATE">
+        <category>general</category>
+        <client_script/>
+        <description>Secured Entities (See also the UI Page iframe)&#13;
+Access by x_230565_emsn_iframe.do?name=SecuredEntities (See also the Module Secure Entities)&#13;
+&#13;
+Note access to object property after &lt;g:evaluate/&gt;, why $[jvar_entityinfo_length] is empty when log "entityinfos.length==1", See https://community.servicenow.com/community?id=community_question&amp;sys_id=878fcb25dbdcdbc01dcaf3231f96192e. shit ServiceNow.</description>
+        <direct>false</direct>
+        <endpoint>x_230565_emsn_SecuredEntities.do</endpoint>
+        <html><![CDATA[<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly trim="false" xmlns:j="jelly:core" xmlns:g="glide" xmlns:j2="null" xmlns:g2="null">
+<!-- <!DOCTYPE html> Error at line (3) A DOCTYPE is not allowed in content. -->
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta http-equiv="X-UA-Compatible" content="ie=edge"/>
+    <title>Secure Entities</title>
+	<g:evaluate var="jvar_grCSS" object="true">
+        // Latest compiled and minified CSS
+        var grCSS = new GlideRecord('content_css');
+        grCSS.get('name', 'SecuredEntities.css');
+		grCSS;
+    </g:evaluate>
+    <!-- SecuredEntities.css --><link href="${jvar_grCSS.getValue('sys_id')}.cssdbx?revision=${jvar_grCSS.getValue('sys_updated_on')}" rel="stylesheet" type="text/css" />
+</head>
+
+<body>
+    <div class="header">
+        <div class="topbar">
+            <div id="topbarHomeBtn" class="col btn co-title-wrap"><img class="co-title" src="nxl_title_sm.png"/>
+                <h6 class="co-title-desc font-sm font-bold">Entitlement Management</h6>
+            </div>
+            <div id="topbarSaveBtn" class="col btn topbar-btn-wrap">
+                <i class="box save-icon"></i><span class="topbar-btn-text font-md">Secure Selected Entities</span>
+            </div>
+            <i style="display: none !important;" class="box sep-v"></i>
+            <div style="display: none !important;" id="topbarExportAndSaveBtn" class="col btn topbar-btn-wrap">
+                <i class="box export-icon"></i><span class="topbar-btn-text font-md">Export &amp; Secure Selected Entities</span>
+            </div>
+        </div>
+    </div>
+    <div id="fieldSelectorModal" class="overlay hide">
+        <div class="modal modal-field-selector">
+            <div class="modal-header gray-down">
+                <h4 class="modal-title font-bold">Reference Fields Selector</h4><button class="btn modal-close">X</button>
+            </div>
+            <div class="modal-body modal-field-selector-body">
+                <div id="treevieweWrap" class="treeview-wrap">
+                    <!-- <div class="tree-node">
+                        <div class="tree-node-content"><i class="box btn attr-toggle-icon" data-expand="false">+</i><span class="table-name font-bold">Caller</span></div>
+                        <div class="child-tree-node">
+                            <div class="tree-node-content">
+                                <div class="box checkbox-sm-wrap">
+                                    <input id="user.name" type="checkbox" class="checkbox-sm hide" /><label for="user.name" class="box"></label>
+                                </div><span class="field-name">Name</span>
+                            </div>
+                            <div class="tree-node-content">
+                                <div class="box checkbox-sm-wrap">
+                                    <input id="user.email" type="checkbox" class="checkbox-sm hide" /><label for="user.email" class="box"></label>
+                                </div><span class="field-name">Email</span>
+                            </div>
+                            <div class="tree-node">
+                                <div class="tree-node-content">
+                                    <i class="box btn attr-toggle-icon" data-expand="false">+</i><span class="table-name font-bold">Department</span>
+                                </div>
+                                <div class="child-tree-node">
+                                    <div class="tree-node-content">
+                                        <div class="box checkbox-sm-wrap">
+                                            <input id="dept.name" type="checkbox" class="checkbox-sm hide" /><label for="dept.name" class="box"></label>
+                                        </div><span class="field-name">Name</span>
+                                    </div>
+                                    <div class="tree-node-content">
+                                        <div class="box checkbox-sm-wrap">
+                                            <input id="dept.address" type="checkbox" class="checkbox-sm hide" /><label for="dept.address" class="box"></label>
+                                        </div><span class="field-name">Address</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div> -->
+                </div>
+            </div>
+            <div class="modal-footer modal-toolbar gray-up">
+                <button id="fieldSelectorCancelBtn" class="btn btn-default btn-sm font-md footer-btn-margin">Cancel</button>
+                <button id="fieldSelectorConfirmBtn" class="btn btn-default btn-sm font-md footer-btn-margin">Confirm</button>
+            </div>
+        </div>
+    </div>
+    <div id="overlay" class="overlay hide">
+        <div class="modal">
+            <div class="modal-header gray-down">
+                <h4 class="modal-title font-bold">Step 1: Saving the configuration of security entities.</h4><button class="btn modal-close hide">X</button>
+            </div>
+            <div id="secureEntitiesBody" class="modal-body">
+                <p id="displayMsg" class="modal-msg"> Enabling NextLabs Entitlement Management for the selected ServiceNow Entities. This may take a little while... </p>
+                <p class="modal-progress-msg">
+                    <span>Processing Entity &#160;</span>
+                    <span id="currentIndex">1</span><span>/</span><span id="totalCount">0</span><span>:&#160;</span>
+                    <span id="currentEntityName"></span>
+                </p>
+                <div class="bar-wrap"><div id="progressBar" class="bar"></div></div>
+				<span id="secureNextStep" style="font-weight:bold; text-align:left;">Step 2: Referring to &#160;<a href="https://emsn-help.pep.cloudaz.com/index.html" rel="noopener noreferrer" target="_blank" style="font-weight:bold;">online help</a>&#160; to secure entities either manually or automatically using ACL rules.</span> <span id="secureEntitiesResult" class="hide" style="font-weight:bold; text-align:left;color:Red;">Secure entities failed,please click Secure Selected Entities try again.</span>
+            </div>
+			<div id="displayResultBody" class="modal-body hide" style="height: 210px;font-size: 20px;">
+				<p id="secureEntitiesMsg" class="modal-msg"> Secure entities failed,please click Secure Selected Entities try again.</p>
+			</div>
+            <div class="modal-footer modal-toolbar gray-up">               
+                <button id="export-confirm-btn" class="btn btn-default btn-sm font-md footer-btn-margin">OK</button>
+            </div>
+        </div>
+    </div>
+    <div class="content">
+        <div>
+            <div class="content-header"><img class="box content-header-avatar" src="nxl_secure_entities.png"/>
+                <div class="box content-title-wrap">
+                    <h2 class="content-title font-bold">Secure Entities</h2>
+                    <p class="content-title-desc font-md">Entitlement Management settings</p>
+                    <hr class="sep-title-h" />
+                    <p class="content-title-info font-md">Users can only access selected entities and records that they are authorized to use, based on the policies defined in NextLabs CloudAz.</p>
+                </div>
+            </div>
+            <div class="content-body se-body">
+                <div class="section">
+                    <div class="section-content section-toolbar">
+                        <div class="form-group-inline"><label for="scopeSelector" class="form-control-inline font-bold">Scope</label>
+                            <select id="scopeSelector" class="form-control-inline toolbar-select font-bold">
+                                    <!-- <option selected="true" value="Any">All Areas</option>
+                                    <option value="Sales">Sales</option>
+                                    <option value="global">Global</option>
+                                    <option value="Service">Service</option>
+                                    <option value="Marketing">Marketing</option>
+                                    <option value="Settings">Settings</option>
+                                    <option value="Help">Help</option> -->
+                            </select>
+                        </div>
+                        <div class="form-group-inline"><label for="showSelector" class="form-control-inline font-bold">Show</label>
+                            <select id="showSelector" class="form-control-inline font-bold toolbar-select">
+                                <option value="0" selected="">All Entities</option>
+                                <option value="1">Secured Entities</option>
+                                <option value="2">Not Secured Entities</option>
+                            </select>
+                        </div>
+                        <div class="form-group-inline"><input id="searchBox" class="toolbar-search-box" type="text" />
+                            <button id="searchBtn" class="btn toolbar-search-btn">Search</button>
+                        </div>
+                    </div>
+                    <div class="section-content section-toolbar" id="ecSection">
+                        <div class="form-group-inline">
+                            <label for="showSelector1" class="form-control-inline font-bold" style="margin:5px 25px;display:inline;position:absolute;left:30px;">Entities
+                                Classification</label>
+                            <select id="entitiesCategory" class="form-control-inline font-bold toolbar-select1">
+                                <option value="0" selected="">Please select</option>
+                                <option value="1">IT Service Management</option>
+                                <option value="2">IT Operations Management</option>
+                                <option value="3">IT Business Management</option>
+                                <option value="4">Customer Service</option>
+                                <option value="5">HR Service Delivery</option>
+                            </select>
+                            <select id="entitiesCategory2" class="form-control-inline font-bold toolbar-select2"></select>
+                            <select id="entitiesCategory3" class="form-control-inline font-bold toolbar-select3"></select>
+                        </div>
+                    </div>
+                </div>
+                <hr class="sep-title-h" />
+                <div class="section section-select-all">
+                    <div class="form-group select-all-wrap"><input id="selectAllCheckbox" type="checkbox" class="checkbox hide" />
+                        <label for="selectAllCheckbox" class="box"></label><label class="form-control-inline select-all font-bold font-lg">SELECT ALL</label>
+                    </div>
+                </div>
+                <hr class="sep-title-h" />
+                <div class="section section-entity-list">
+                    <ul id="entityList">
+                        <!-- <li class="entity-card">
+                            <div class="box checkbox-wrap">
+                                <input id="account" type="checkbox" class="checkbox hide" /><label for="account" class="box checkbox-presenter"></label></div>
+                            <div class="box entity-item-wrap">
+                                <div class="entity-title-wrap">
+                                    <label class="form-control-inline font-bold font-lg">Accounts</label><label class="form-control-inline font-bold font-md">(Service | Sales)</label>
+                                </div>
+                                <p class="entity-desc font-md">Business that represents a customer or potential customer. The company that is billed in business transactions.</p>
+                                <p class="show-fields-wrap"><a class="link font-md">Show Fields (<em class="font-blue">28</em>)</a></p>
+                                <div class="entity-table-wrap">
+                                    <p class="attrs-desc font-md font-blue">Fields available for policy authoring and evaluation</p>
+                                    <table class="entity-table">
+                                        <thead>
+                                            <tr>
+                                                <th class="td-sm"><input id="account-attr-all" type="checkbox" class="checkbox hide" /><label for="account-attr-all" class="box"></label></th>
+                                                <th class="td-lg"><span class="font-bold font-md">Display Name</span></th>
+                                                <th class="td-lg"><span class="font-bold font-md">Name</span></th>
+                                                <th class="td-lg"><span class="font-bold font-md">Data Type</span></th>
+                                                <th class="td-lg"><span class="font-bold font-md">Required / Optional</span></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td class="td-sm"><input id="new_ttttt" type="checkbox" class="checkbox hide" /><label for="new_ttttt" class="box"></label></td>
+                                                <td class="td-lg bg-gray-light">
+                                                    <span class="entity-display-name font-default font-md">?</span>
+                                                    <span class="entity-display-name-info font-default" title="No Description"></span>
+                                                </td>
+                                                <td class="td-lg"><span class="font-default font-md">new_ttttt</span></td>
+                                                <td class="td-lg bg-gray-light"><span class="font-default font-md">Single Line of Text</span></td>
+                                                <td class="td-lg"><span class="font-default font-md">Optional</span></td>
+                                            </tr>
+                                            <tr>
+                                                <td class="td-sm"><input id="accountid" type="checkbox" class="checkbox hide" /><label for="accountid" class="box"></label></td>
+                                                <td class="td-lg bg-gray-light">
+                                                    <span class="entity-display-name font-default font-md">Account</span>
+                                                    <span class="entity-display-name-info font-default" title="Unique identifier of the account."></span>
+                                                </td>
+                                                <td class="td-lg"><span class="font-default font-md">accountid</span></td>
+                                                <td class="td-lg bg-gray-light"><span class="font-default font-md">Primary Key</span></td>
+                                                <td class="td-lg"><span class="font-default font-md">Required</span></td>
+                                            </tr>
+                                            <tr>
+                                                <td class="td-sm"><input id="name" type="checkbox" class="checkbox hide" /><label for="name" class="box"></label></td>
+                                                <td class="td-lg bg-gray-light">
+                                                    <span class="entity-display-name font-default font-md">Account Name</span>
+                                                    <span class="entity-display-name-info font-default" title="Type the company or business name."></span>
+                                                </td>
+                                                <td class="td-lg"><span class="font-default font-md">name</span></td>
+                                                <td class="td-lg bg-gray-light"><span class="font-default font-md">Single Line of Text</span></td>
+                                                <td class="td-lg"><span class="font-default font-md">Required</span></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </li>
+                        <hr class="sep-entity-h" />
+                        <li class="entity-card">
+                            <div class="box checkbox-wrap"><input id="contact" type="checkbox" class="checkbox hide" /><label for="contact"
+                                    class="box checkbox-presenter"></label></div>
+                            <div class="box entity-item-wrap">
+                                <div class="entity-title-wrap">
+                                    <label class="form-control-inline font-bold font-lg">Contacts</label>
+                                    <label class="form-control-inline font-bold font-md">(Sales | Service | Marketing)</label>
+                                </div>
+                                <p class="entity-desc font-md">Person with whom a business unit has a relationship, such as customer, supplier, and colleague.</p>
+                                <div class="entity-table-wrap">
+                                    <p class="show-fields-wrap"><a class="link font-md">Show Fields (<em class="font-blue">28</em>)</a></p>
+                                    <p class="attrs-desc font-md font-blue">Fields available for policy authoring and evaluation</p>
+                                    <table class="entity-table">
+                                        <thead>
+                                            <tr>
+                                                <th class="td-sm"><input id="account-attr-all" type="checkbox" class="checkbox hide" /><label for="account-attr-all" class="box"></label></th>
+                                                <th class="td-lg"><span class="font-bold font-md">Display Name</span></th>
+                                                <th class="td-lg"><span class="font-bold font-md">Name</span></th>
+                                                <th class="td-lg"><span class="font-bold font-md">Data Type</span></th>
+                                                <th class="td-lg"><span class="font-bold font-md">Required / Optional</span></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td class="td-sm"><input id="new_ttttt" type="checkbox" class="checkbox hide" /><label for="new_ttttt" class="box"></label></td>
+                                                <td class="td-lg bg-gray-light">
+                                                    <span class="entity-display-name font-default font-md">Account</span>
+                                                    <span class="entity-display-name-info font-default" title="No Description"></span>
+                                                </td>
+                                                <td class="td-lg"><span class="font-default font-md">accountid</span></td>
+                                                <td class="td-lg bg-gray-light"><span class="font-default font-md">Lookup</span></td>
+                                                <td class="td-lg"><span class="font-default font-md">Optional</span></td>
+                                            </tr>
+                                            <tr>
+                                                <td class="td-sm"><input id="accountid" type="checkbox" class="checkbox hide" /><label for="accountid" class="box"></label></td>
+                                                <td class="td-lg bg-gray-light">
+                                                    <span class="entity-display-name font-default font-md">Address 1</span>
+                                                    <span class="entity-display-name-info font-default" title="Unique identifier of the account."></span>
+                                                </td>
+                                                <td class="td-lg"><span class="font-default font-md">address1_composite</span></td>
+                                                <td class="td-lg bg-gray-light"><span class="font-default font-md">Multiple Lines of Text</span></td>
+                                                <td class="td-lg"><span class="font-default font-md">Required</span></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </li> -->
+                    </ul>
+                </div>
+                <div class="pager-wrap"><button id="pagerPrev" class="box btn pager pager-slide font-md" disabled="disabled">&#8592; Previous</button>
+                    <ul id="pagerList" class="box">
+                        <!-- <li class="btn box pager font-md">1</li>
+                        <li class="btn box pager font-md">2</li>
+                        <li class="btn box pager font-md">3</li>
+                        <li class="btn box pager font-md">4</li>
+                        <li class="btn box pager font-md">5</li>
+                        <li class="btn box pager font-md">6</li>
+                        <li class="btn box pager font-md">7</li>
+                        <li class="btn box pager font-md">8</li>
+                        <li class="btn box pager font-md">9</li>
+                        <li class="btn box pager font-md">10</li> -->
+                    </ul><button id="pagerNext" class="box btn pager pager-slide font-md" disabled="disabled">Next &#8594;</button>
+                </div>
+            </div>
+            <div class="content-footer footer-toolbar-wrap">
+                <div class="footer-toolbar">
+                    <button class="btn" id="bottomSaveBtn">Secure Selected Entities</button>
+                    <button style="display: none !important;" class="btn" id="bottomExportSaveBtn">Export &amp; Secure Selected Entities</button>
+                    <button style="display: none !important;" class="btn" id="uninstallBtn">Delete This Application</button><button class="btn hide">Import Secured Entities</button>
+                </div>
+            </div>
+            <div id="floatingBox">
+                <button class="hide" onclick="parent.$j('#summaryEntity', document).toggle()">⇽</button>
+                <div id="summaryEntity" class="summary-container">
+                    <div class="summary-header">
+                        <h3 class="summary-title font-bold font-lg">Secured Entities <span class="summary-title-counter">&#160;(<em id="entityCounter">0</em>)</span>
+						</h3>
+                    </div>
+                    <div class="summary-toolbar">
+                        <div class="box section-inline summary-toolwrap-inline hide">
+                            <i class="box btn expand-all-icon summary-icon"></i><i class="box btn collapse-all-icon summary-icon"></i>
+                        </div>
+                        <i class="box sep-v"></i>
+                        <div class="box section-inline summary-toolwrap-inline">
+                            <i id="summarySaveBtn" class="box btn save-icon summary-icon"></i>
+                            <i style="display: none !important;" id="summaryExportBtn" class="box btn export-icon summary-icon"></i>
+                            <i class="box btn import-icon summary-icon hide"></i>
+                        </div>
+                    </div>
+                    <div class="summary-new-items"><i class="font-red font-md font-italic">*New Items</i></div>
+                    <div class="summary-content">
+                        <ul id="summaryEntityList" class="summary-entity-list">
+                            <!-- <li class="summary-entity-wrap">
+                                <div class="entity-name-wrap">
+                                    <i class="box attr-toggle-icon">-</i><span class="summary-entity font-bold">Accounts ( <em>0</em> fields )</span><a class="link font-sm summary-remove">Remove</a>
+                                </div>
+                                <ul class="grid summary-attrs-wrap">
+                                    <li class="box summary-attr-wrap"><span class="font-red font-sm summary-attr">Account</span><i class="box attr-delete-icon"></i></li>
+                                    <li class="box summary-attr-wrap"><span class="font-red font-sm summary-attr">CountactId</span><i class="box attr-delete-icon"></i></li>
+                                </ul>
+                            </li>
+                            <hr class="sep-summary-h" />
+                            <li class="summary-entity-wrap">
+                                <div class="entity-name-wrap">
+                                    <i class="box attr-toggle-icon">-</i><span class="summary-entity font-bold">Contact ( <em>0</em> fields )</span><a class="link font-sm summary-remove">Remove</a>
+                                </div>
+                                <ul class="grid summary-attrs-wrap">
+                                    <li class="box summary-attr-wrap"><span class="font-red font-sm summary-attr">Contact</span><i class="box attr-delete-icon"></i></li>
+                                    <li class="box summary-attr-wrap"><span class="font-red font-sm summary-attr">OpportunityId</span><i class="box attr-delete-icon"></i></li>
+                                </ul>
+                            </li> -->
+                        </ul>
+                    </div>
+                    <g:evaluate var="jvar_entityinfo_count">
+                        var str = SEUtil.getProperty('LastDeselectedEntities');
+                        SEUtil.debug('UIPage.SecuredEntities', 'LastDeselectedEntities={0}', str);
+                        var entityinfos = JSON.parse(str); // var entityinfos = new global.JSON().decode(str);
+                        SEUtil.debug('UIPage.SecuredEntities', 'entityinfos.length={0}', entityinfos.length);
+                        entityinfos.length;
+                    </g:evaluate>
+                    <div class="summary-header">
+                        <h3 class="summary-title font-bold font-lg">Last Deselected Entities<span class="summary-title-counter">&#160;(<em id="lastDeselectedCount">${jvar_entityinfo_count}</em>)</span></h3>
+                    </div>
+                    <div class="summary-content">
+                        <ul id="deselectedEntityList" class="summary-entity-list" style="padding-top: 18px; max-height: 240px;">
+                            <j:forEach items="${entityinfos}" var="jvar_entityinfo">
+                                <!-- <j:forEach indexVar="i" begin="1" end="3"> indexVar='i' is not supported and use var="i" instead in ServiceNow Jelly ? -->
+                                <g:evaluate jelly="true">
+                                    var entityName = jelly.jvar_entityinfo.name;
+                                    var entityDisplayName = jelly.jvar_entityinfo.displayName;
+                                    SEUtil.debug('UIPage.SecuredEntities', 'entity: {0} [{1}]', entityName, entityDisplayName);
+                                    // <option value="cmdb_ci_appl_dot_net">.NET Application [cmdb_ci_appl_dot_net]</option>
+                                    // <span class="summary-entity font-bold">${HTML:jvar_entityinfo.name} [${HTML:jvar_entityinfo.displayName}]</span>
+                                </g:evaluate>
+                                <li class="summary-deselected-entity">
+                                    <span>${entityDisplayName} [${entityName}]</span>
+                                </li>
+                                <hr class="sep-summary-h"/>
+                            </j:forEach>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="mask"></div>
+
+        <g:evaluate>
+                var UIScriptNames = ['promise-polyfill', 'nxl_util', 'nxl-sn-sdk', 'secure-entities'];
+                var ui_script_timestamps = SEUtil.getUIScriptTimestamps(UIScriptNames);
+                var idxUIScript = 0;
+        </g:evaluate>
+        <j:forEach items="${UIScriptNames}" var="jvar_ui_script_name">
+            <g:evaluate var="jvar_ui_script_timestamp" jelly="true">
+                var ui_script_timestamp = ui_script_timestamps[idxUIScript++];
+                SEUtil.debug('UIPage.SecuredEntities', '{0}: {1} was updated on {2}', idxUIScript, jelly.jvar_ui_script_name, ui_script_timestamp);
+                ui_script_timestamp;
+            </g:evaluate>
+            <g:requires name="x_230565_emsn.${jvar_ui_script_name}.jsdbx" params="cache=${ui_script_timestamp}" />
+        </j:forEach>
+    </div>
+</body>
+
+</html>
+</j:jelly>]]></html>
+        <name>SecuredEntities</name>
+        <processing_script/>
+        <sys_class_name>sys_ui_page</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-10-12 10:47:13</sys_created_on>
+        <sys_id>58b418c54f710300b44b00f18110c737</sys_id>
+        <sys_mod_count>298</sys_mod_count>
+        <sys_name>SecuredEntities</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ui_page_58b418c54f710300b44b00f18110c737</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-03-28 12:31:23</sys_updated_on>
+    </sys_ui_page>
+</record_update>

@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="content_css">
+    <content_css action="INSERT_OR_UPDATE">
+        <name>sidebar.css</name>
+        <style>/* layouts */&#13;
+.sidebar{&#13;
+    &#13;
+}&#13;
+.sidebar-filter-wrap{&#13;
+    height: 40px;&#13;
+    padding: 10px;&#13;
+}&#13;
+.sidebar-pivot-wrap{&#13;
+    height: calc(100vh - 124px);&#13;
+}&#13;
+.sidebar-footer{&#13;
+    height: 40px;&#13;
+    padding: 10px;&#13;
+}&#13;
+&#13;
+/* modules */&#13;
+.sidebar-sep-h{&#13;
+    height: 4px;&#13;
+    background-color: #456;&#13;
+    border: 0;&#13;
+    margin: 0;&#13;
+}&#13;
+.siderbar-filter{&#13;
+    border: 2px solid #457;&#13;
+    border-radius: 15px;&#13;
+    height: 24px;&#13;
+    padding: 2px;&#13;
+    overflow: hidden;&#13;
+}&#13;
+.filter-icon{&#13;
+    width: 20px;&#13;
+    height: 20px;&#13;
+    margin: 2px;&#13;
+    background-image: url('../img/nxl_filter.png');&#13;
+    background-repeat: no-repeat;&#13;
+    background-size: contain;    &#13;
+}&#13;
+.filter-input{&#13;
+    background-color: transparent;&#13;
+    height: 20px;&#13;
+    padding: 2px;&#13;
+    border: 0;&#13;
+    color: #ccc;&#13;
+}&#13;
+.filter-input:focus{&#13;
+    border: 0;&#13;
+    outline: 0;&#13;
+}&#13;
+.sidebar-pivot-tabs{&#13;
+    font-size: 0;&#13;
+}&#13;
+.sidebar-pivot-tab{&#13;
+    width: calc(100% / 3);&#13;
+    height: 38px;&#13;
+    border-width: 0 0 2px 0;&#13;
+    border-style: solid;&#13;
+    border-color: #456;&#13;
+    background-color: transparent;&#13;
+    text-align: center;&#13;
+}&#13;
+.sidebar-pivot-tab:hover{&#13;
+    background-color: #567;&#13;
+    border-color: #58b;&#13;
+    cursor: pointer;&#13;
+}&#13;
+.collection-icon{&#13;
+    width: 20px;&#13;
+    height: 20px;&#13;
+    margin: 9px 0;&#13;
+    background-image: url('../img/nxl_collection.png');&#13;
+    background-repeat: no-repeat;&#13;
+    background-size: contain;&#13;
+}&#13;
+.star-icon{&#13;
+    width: 20px;&#13;
+    height: 20px;&#13;
+    margin: 9px 0;&#13;
+    background-image: url('../img/nxl_stars.png');&#13;
+    background-repeat: no-repeat;&#13;
+    background-size: contain;&#13;
+}&#13;
+.history-icon{&#13;
+    width: 20px;&#13;
+    height: 20px;&#13;
+    margin: 9px 0;&#13;
+    background-image: url('../img/nxl_history.png');&#13;
+    background-repeat: no-repeat;&#13;
+    background-size: contain;&#13;
+}&#13;
+.modify-icon{&#13;
+    width: 20px;&#13;
+    height: 20px;&#13;
+    margin: 10px 5px;&#13;
+    background-image: url('../img/nxl_modify.png');&#13;
+    background-repeat: no-repeat;&#13;
+    background-size: contain;&#13;
+}&#13;
+.favo-icon{&#13;
+    width: 20px;&#13;
+    height: 20px;&#13;
+    margin: 10px 5px;&#13;
+    background-image: url('../img/nxl_stars.png');&#13;
+    background-repeat: no-repeat;&#13;
+    background-size: contain;&#13;
+}&#13;
+.sidebar-pivot-list-item{&#13;
+    height: 40px;&#13;
+    padding: 0 10px;&#13;
+    background-color: #567;&#13;
+    border-width: 0 0 .1px 0;&#13;
+    border-style: solid;&#13;
+    border-color: #000;&#13;
+}&#13;
+.sidebar-pivot-list-item-title{&#13;
+    height: 40px;&#13;
+    padding: 0 10px;&#13;
+    background-color: #567;&#13;
+    border-width: 0 0 .1px 0;&#13;
+    border-style: solid;&#13;
+    border-color: #000;&#13;
+}&#13;
+.sidebar-pivot-list-item:hover{&#13;
+    background-color: #7c8a97;&#13;
+    cursor: pointer;&#13;
+}&#13;
+.sidebar-pivot-list-item:hover &gt; i{&#13;
+    display: inline-block !important;&#13;
+}&#13;
+.sidebar-pivot-list-item-text{&#13;
+    width: 160px;&#13;
+    overflow: hidden;&#13;
+    text-overflow: ellipsis;&#13;
+    line-height: 40px;&#13;
+    color: #eee;&#13;
+}</style>
+        <sys_class_name>content_css</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-10-27 08:22:44</sys_created_on>
+        <sys_id>ec5346fd4f420300b44b00f18110c707</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>sidebar.css</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>content_css_ec5346fd4f420300b44b00f18110c707</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2017-10-27 08:22:44</sys_updated_on>
+        <type>local</type>
+        <url/>
+    </content_css>
+</record_update>

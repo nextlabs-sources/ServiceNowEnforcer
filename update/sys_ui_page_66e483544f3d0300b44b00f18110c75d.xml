@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ui_page">
+    <sys_ui_page action="INSERT_OR_UPDATE">
+        <category>general</category>
+        <client_script/>
+        <description>User Attributes Export</description>
+        <direct>false</direct>
+        <endpoint>x_230565_emsn_UserAttributes.do</endpoint>
+        <html><![CDATA[<?xml version="1.0" encoding="utf-8" ?><j:jelly trim="false" xmlns:j="jelly:core" xmlns:g="glide" xmlns:j2="null" xmlns:g2="null">
+<!-- <!DOCTYPE html> Error at line (3) A DOCTYPE is not allowed in content. -->
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+    <title>User Attributes</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+	<g:evaluate var="jvar_grCSS" object="true">
+        // Latest compiled and minified CSS <style type="text/css"></style>
+        var grCSS = new GlideRecord('content_css');
+        grCSS.get('name', 'UserAttributes.css');
+		grCSS;
+    </g:evaluate>
+    <!-- UserAttributes.css --><link href="${jvar_grCSS.getValue('sys_id')}.cssdbx?revision=${jvar_grCSS.getValue('sys_updated_on')}" rel="stylesheet" type="text/css" />
+</head>
+<body>
+    <div class="header">
+        <div class="topbar">
+            <div id="topbarHomeBtn" class="col btn co-title-wrap">
+                <img class="co-title" src="nxl_title_sm.png"/><h6 class="co-title-desc font-sm font-bold">Entitlement Management</h6>
+            </div>
+            <div id="topbarSaveBtn" class="col btn topbar-btn-wrap"><i class="box save-icon"></i><span class="topbar-btn-text font-md">Save Attributes</span></div>
+            <i style="display: none !important;" class="box sep-v"></i>
+            <div style="display: none !important;" id="topbarExportAndSaveBtn" class="col btn topbar-btn-wrap">
+                <i class="box export-icon"></i><span class="topbar-btn-text font-md">Export &amp; Save Selected Attributes</span>
+            </div>
+        </div>
+    </div>
+    <div id="fieldSelectorModal" class="overlay hide">
+        <div class="modal modal-field-selector">
+            <div class="modal-header gray-down">
+                <h4 class="modal-title font-bold">Reference Fields Selector</h4><button class="btn modal-close">X</button>
+            </div>
+            <div class="modal-body modal-field-selector-body">
+                <div id="treevieweWrap" class="treeview-wrap">
+                    <!-- <div class="tree-node">
+                        <div class="tree-node-content"><i class="box btn attr-toggle-icon" data-expand="false">+</i><span class="table-name font-bold">Caller</span></div>
+                        <div class="child-tree-node">
+                            <div class="tree-node-content">
+                                <div class="box checkbox-sm-wrap"><input id="user.name" type="checkbox" class="checkbox-sm hide" /><label for="user.name" class="box"></label></div>
+                                <span class="field-name">Name</span>
+                            </div>
+                            <div class="tree-node-content">
+                                <div class="box checkbox-sm-wrap"><input id="user.email" type="checkbox" class="checkbox-sm hide" /><label for="user.email" class="box"></label></div>
+                                <span class="field-name">Email</span>
+                            </div>
+                            <div class="tree-node">
+                                <div class="tree-node-content">
+                                    <i class="box btn attr-toggle-icon" data-expand="false">+</i><span class="table-name font-bold">Department</span>
+                                </div>
+                                <div class="child-tree-node">
+                                    <div class="tree-node-content">
+                                        <div class="box checkbox-sm-wrap"><input id="dept.name" type="checkbox" class="checkbox-sm hide" /><label for="dept.name" class="box"></label></div>
+                                        <span class="field-name">Name</span>
+                                    </div>
+                                    <div class="tree-node-content">
+                                        <div class="box checkbox-sm-wrap"><input id="dept.address" type="checkbox" class="checkbox-sm hide" /><label for="dept.address" class="box"></label></div>
+                                        <span class="field-name">Address</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div> -->
+                </div>
+            </div>
+            <div class="modal-footer modal-toolbar gray-up">
+                <button id="fieldSelectorCancelBtn" class="btn btn-default btn-sm font-md footer-btn-margin">Cancel</button>
+                <button id="fieldSelectorConfirmBtn" class="btn btn-default btn-sm font-md footer-btn-margin">Confirm</button>
+            </div>
+        </div>
+    </div>
+    <div id="overlay" class="overlay hide">
+        <div class="modal">
+            <div class="modal-header gray-down">
+                <h4 class="modal-title font-bold">Working on it...</h4><button class="btn modal-close hide">X</button>
+            </div>
+            <div class="modal-body">
+                <p id="displayMsg" class="modal-msg"> Enabling NextLabs Entitlement Management for the selected ServiceNow Entities. This may take a little while... </p>
+                <p class="modal-progress-msg">
+                    <span>Processing Entity$[SP]$[SP]</span>
+                    <span id="currentIndex">1</span><span>/</span><span id="totalCount">0</span><span>:$[SP]</span><span id="currentEntityName"></span>
+                </p>
+                <div class="bar-wrap">
+                    <div id="progressBar" class="bar"></div>
+                </div>
+            </div>
+            <div class="modal-footer modal-toolbar gray-up hide">
+                <button id="export-cancel-btn" class="btn btn-default btn-sm btn-ms">Cancel</button>
+                <button id="export-confirm-btn" class="btn btn-default btn-sm btn-ms">Export</button>
+            </div>
+        </div>
+    </div>
+    <div class="content">
+        <div>
+            <div class="content-header"><img class="box content-header-avatar" src="nxl_user_attributes.png"/>
+                <div class="box content-title-wrap">
+                    <h2 class="content-title font-bold">User Attributes</h2>
+                    <p class="content-title-desc font-md">Configure user attributes available for policy authoring and evaluation</p>
+                    <hr class="sep-title-h"/>
+                    <p class="content-title-info font-md">Users can only access selected entities and records that they are authorized to use, based on the policies defined in NextLabs CloudAz.</p>
+                </div>
+            </div>
+            <div class="content-body se-body">
+                <div class="section section-entity-list">
+                    <div class="entity-table-wrap">
+                        <p class="show-fields-wrap font-sm"><i>Total attribuites$[SP]<span id="totalAttrCounter">0</span>$[SP](<span id="selectedAttrCounter">0</span>$[SP]selected)</i></p>
+                        <table id="attrTable" class="entity-table">
+                            <thead>
+                                <tr>
+                                    <th class="td-sm td-pad"><input id="select-attr-all" type="checkbox" class="checkbox hide"/><label for="select-attr-all" class="box"></label></th>
+                                    <th class="td-lg"><span class="font-bold font-md">Display Name</span><input id="ua-displayname" type="checkbox" class="hide" data-prop="displayName"/><label for="ua-displayname" class="sort-tri"></label></th>
+                                    <th class="td-lg"><span class="font-bold font-md">Name</span><input id="ua-name" type="checkbox" class="hide" data-prop="id"/><label for="ua-name" class="sort-tri"></label></th>
+                                    <th class="td-lg"><span class="font-bold font-md">Data Type</span><input id="ua-datatype" type="checkbox" class="hide" data-prop="datatype"/><label for="ua-datatype" class="sort-tri"></label></th>
+                                    <!--
+                                    <th class="td-lg"><span class="font-bold font-md">Acitve</span><input id="ua-active" type="checkbox" class="hide" data-prop="active"/><label for="ua-active" class="sort-tri"/></label></th>
+                                    <th class="td-lg"><span class="font-bold font-md">Mandatory</span><input id="ua-mandatory" type="checkbox" class="hide" data-prop="mandatory"/><label for="ua-mandatory" class="sort-tri"></label></th>
+                                    -->
+                                    <th class="td-lg"><span class="font-bold font-md">Reference Attributes</span></th>
+                                </tr>
+                            </thead>
+							<tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="content-footer footer-toolbar-wrap">
+                <div class="footer-toolbar">
+                    <button id="bottomSaveBtn" class="btn">Save Attributes</button>
+                    <button style="display: none !important;" id="bottomSaveExportBtn" class="btn">Export &amp; Save Selected Attributes</button>
+                    <button class="btn hide">Import User Attribuites</button>
+                </div>
+            </div>
+        </div>
+        <g:evaluate>
+                var UIScriptNames = ['promise-polyfill', 'nxl_util', 'nxl-sn-sdk', 'user-attributes'];
+                var ui_script_timestamps = SEUtil.getUIScriptTimestamps(UIScriptNames);
+                var idxUIScript = 0;
+        </g:evaluate>
+        <j:forEach items="${UIScriptNames}" var="jvar_ui_script_name">
+            <g:evaluate var="jvar_ui_script_timestamp" jelly="true">
+                var ui_script_timestamp = ui_script_timestamps[idxUIScript++];
+				// https://old.wiki/index.php/Extensions_to_Jelly_Syntax#RP
+				// RP.getReferringURL() – returns to URL that got you to this page.
+				// RP.isMobile() – returns true if the page is in mobile mode (browsing using a Blackberry, etc.)
+				// RP.getParameters() – returns all the parameters passed on the URL (to loop through)
+				// RP.getParameterValue(parameterName) - returns the value of the specified parameter passed on the URL
+				// RP.getViewID() - returns the view in use. :( Cannot find function getViewID in object com.glide.script.fencing.ScopedRenderProperties@xx
+                SEUtil.debug('UIPage.UserAttributes', '{0}: {1} was updated on {2}', idxUIScript, jelly.jvar_ui_script_name, ui_script_timestamp);
+                ui_script_timestamp;
+            </g:evaluate>
+            <g:requires name="x_230565_emsn.${jvar_ui_script_name}.jsdbx" params="cache=${ui_script_timestamp}" />
+        </j:forEach>
+    </div>
+</body>
+</html>
+</j:jelly>]]></html>
+        <name>UserAttributes</name>
+        <processing_script/>
+        <sys_class_name>sys_ui_page</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-10-10 11:05:15</sys_created_on>
+        <sys_id>66e483544f3d0300b44b00f18110c75d</sys_id>
+        <sys_mod_count>69</sys_mod_count>
+        <sys_name>UserAttributes</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ui_page_66e483544f3d0300b44b00f18110c75d</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-01-17 10:56:03</sys_updated_on>
+    </sys_ui_page>
+</record_update>

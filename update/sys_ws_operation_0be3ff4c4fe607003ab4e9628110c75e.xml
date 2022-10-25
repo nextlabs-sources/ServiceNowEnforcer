@@ -1,0 +1,516 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ws_operation">
+    <sys_ws_operation action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <consumes>application/json,application/xml,text/xml</consumes>
+        <consumes_customized>false</consumes_customized>
+        <default_operation_uri/>
+        <enforce_acl>68fa684adb4f53009f989f5faa96199a</enforce_acl>
+        <http_method>POST</http_method>
+        <name>EntitySettings</name>
+        <operation_script><![CDATA[/**
+ * Check whether the specific entity name should be displayed
+ * @param {string} name the entity name to check
+ */
+function isBlackEntity(name, label) {
+    return 'sys_user' === name || 'sys_security_acl' === name || null === name || null === label;
+}
+
+/*
+	获取分页信息函数
+	该函数从request参数中获取请求的page index及page size,返回page count和指定页的records
+*/
+function GetPaginationInfo(request, response)
+{
+	var requestData = request.body.data;
+	var pageIndex = requestData.func_arguments.page_index;
+	var pageSize = requestData.func_arguments.page_size;
+	var scopeName = requestData.func_arguments.scope_name;
+	if (pageIndex>0 && pageSize>0)
+	{
+		var grTotalCount = new GlideAggregate("sys_db_object");
+		grTotalCount.addAggregate("COUNT");
+		grTotalCount.addNotNullQuery("name");
+		grTotalCount.addQuery("sys_scope.scope", scopeName);
+		grTotalCount.query();
+		if (grTotalCount.next())
+		{
+			var totalRecordCount = grTotalCount.getAggregate("COUNT");
+			if (pageIndex > totalRecordCount && pageIndex!=1)
+			{
+				response.setBody({error:"page index out of bound"});
+			}
+			else
+			{
+				var pageCount = parseInt((totalRecordCount + (pageSize-1)) / pageSize);
+				var startIndex = (pageIndex-1) * pageSize;
+				var endIndex = startIndex + pageSize;
+				var grRecords = new GlideRecord("sys_db_object");
+				grRecords.orderBy("label");
+				grRecords.addNotNullQuery("name");
+				grRecords.addQuery("sys_scope.scope", scopeName);
+				grRecords.chooseWindow(startIndex, endIndex);
+				grRecords.query();				
+				var entityNames = [];
+				var records = [];
+				while(grRecords.next())
+				{
+					var displayName = grRecords.getValue("label");
+					var internalName = grRecords.getValue("name");
+					var scope_name = grRecords.sys_scope.scope;
+					if (!isBlackEntity(internalName)) {
+						records.push({ scope_name: scope_name, display_name: displayName, internal_name: internalName, active: false });
+					}
+				}
+				if (records.length>0)
+				{
+					var internalNames = '';
+					for (var i=0; i<records.length; i++)
+					{
+						internalNames = internalNames + records[i].internal_name + ',';
+					}	
+					var currentScopeName = gs.getCurrentScopeName();
+					var entityAttribute = new GlideRecord(currentScopeName+"_entitycolumn");
+					entityAttribute.addActiveQuery("name", "IN", internalNames);
+					entityAttribute.query();
+					while (entityAttribute.next())
+					{
+						var activeEntityName = entityAttribute.getValue("name");
+						for (i=0; i<records.length; i++)
+						{
+							if (activeEntityName == records[i].internal_name)
+							{
+								records[i].active = true;
+							}
+						}
+					}
+				}
+				response.setBody({error:0,page_count:pageCount,records:records});
+			}
+			
+		}
+		else
+		{
+			response.setBody({error:"grTotal has no next"});
+		}
+	}
+	else
+	{
+		response.setBody({error:"Invalid parameter", page_index:pageIndex, page_size:pageSize});	
+	}
+	
+}
+
+function GetEntityMetadata(request, response)
+{
+	var payload = request.body.data;
+	var entityId = payload.func_arguments.name;
+
+	if(entityId) {
+
+		var entity = {};
+		var tbl = new GlideRecord('sys_db_object');
+		tbl.addQuery('name', entityId);
+		tbl.query();
+
+		while(tbl.next()) {
+			entity.internal_name = tbl.name;
+			entity.display_name = tbl.label;
+			entity.scope_name = tbl.sys_scope.scope;
+			entity.active = false;
+			break;
+		}
+
+		response.setBody({ record: entity });
+	}
+	else {
+		response.setBody({ error:1, record:null });
+	}
+}
+
+/*
+    根据用户传入的table name, 查询该表对应的所有attributes。
+*/
+function GetEntityInfo(request,response)
+{
+	var requestData = request.body.data;
+	var entityInternalName = requestData.func_arguments.internal_name;
+	if (entityInternalName != undefined && entityInternalName != "")
+	{
+		var scopeName = gs.getCurrentScopeName();
+		
+		//从sys_dictionary表中查询对应entity的所有列
+		var entityAttributes = new GlideRecord("sys_dictionary");
+		entityAttributes.addQuery("name", entityInternalName);
+        entityAttributes.addNotNullQuery("element");
+		entityAttributes.query();
+		var entityColumns = [];
+		while(entityAttributes.next())
+		{
+			var columnLabel = entityAttributes.getValue("column_label");
+			var columnName = entityAttributes.getValue("element");
+			var columnID = entityAttributes.getValue("sys_id");
+			var columnType = entityAttributes.getValue("internal_type");
+			var columnMandatory = entityAttributes.getValue("mandatory");
+
+			entityColumns.push({
+				column_name:columnName,
+				column_label:columnLabel,
+				column_id:columnID,
+				column_type: columnType,
+				column_mandatory: columnMandatory,				
+				active:false
+			});
+		}
+		
+ 		//从x_230565_emsn_entitycolumn表中查询所有enforce的列
+ 		var enforceEntityAttributes = new GlideRecord(scopeName+"_entitycolumn");
+ 		enforceEntityAttributes.addQuery("name", entityInternalName);
+ 		enforceEntityAttributes.query();
+ 		while (enforceEntityAttributes.next())
+ 		{
+ 			var enforceColumnName = enforceEntityAttributes.column_id.element;
+ 			for (var i=0; i<entityColumns.length; i++)
+ 			{
+ 				if (enforceColumnName == entityColumns[i].column_name)
+				{
+					entityColumns[i].active = true;
+ 					break;
+ 				}	
+ 			}
+ 		}
+		response.setBody({error:0,entity_name:entityInternalName,entity_columns:entityColumns});
+	}
+	else
+	{
+		var error = new sn_ws_err.UnsupportedMediaTypeError("Invalid parameters");
+		response.setError(error);
+	}	
+}
+
+/*
+根据用户传入的entity label，从entity column表中查找对应的记录
+*/
+function SearchEntityInfo(request, response)
+{
+
+	var ALL_ENTITIES = '0';
+	var SECURE_ENTITIES = '1';
+	var INSECURE_ENTITIES = '2';
+
+	var requestData = request.body.data;
+	var entityLabel = requestData.func_arguments.entity_label;
+	var pageIndex = requestData.func_arguments.page_index;
+	var pageSize = requestData.func_arguments.page_size;
+	var scope = requestData.func_arguments.scope_name;
+	var enforcedEntityIds = requestData.func_arguments.enforcedIds || [];
+	var secureLevel = requestData.func_arguments.secure_level;
+	var ecLabel = requestData.func_arguments.entity_classification;
+	var targetTable = requestData.func_arguments.targetTable;
+
+	if (entityLabel != undefined && entityLabel != null && pageIndex>0 && pageSize>0)
+	{
+		var grTotalSearchCount = new GlideAggregate("sys_db_object");
+		grTotalSearchCount.addAggregate("COUNT");
+		grTotalSearchCount.addQuery("sys_scope.scope", scope);
+		
+		grTotalSearchCount.addQuery("label", "CONTAINS", entityLabel);
+		var qc = grTotalSearchCount.addQuery("label", "CONTAINS", '');
+		for (var idx = 0, cnt = ecLabel.length; idx < cnt; ++idx) {
+			qc.addOrCondition("sys_package.name", "CONTAINS", ecLabel[idx]);
+		    qc.addOrCondition("label", "CONTAINS", ecLabel[idx]);
+		    qc.addOrCondition("name", "CONTAINS", ecLabel[idx]);
+		}
+		if(secureLevel === SECURE_ENTITIES) {
+			grTotalSearchCount.addQuery("name", "IN", enforcedEntityIds.join(","));
+		} else if(secureLevel === INSECURE_ENTITIES) {
+			grTotalSearchCount.addQuery("name", "NOT IN", enforcedEntityIds.join(","));
+		}
+
+		grTotalSearchCount.query();
+
+		var totalSearchCount = 0;
+		if (grTotalSearchCount.next())
+		{
+			totalSearchCount = grTotalSearchCount.getAggregate("COUNT");
+		}
+		
+		var startIndex = (pageIndex-1)*pageSize;
+		var endIndex = startIndex+pageSize;
+		var grSearchEntity = new GlideRecord("sys_db_object");
+		grSearchEntity.orderBy("label");
+		
+		grSearchEntity.addQuery("label", "CONTAINS", entityLabel);
+		var qc2 =grSearchEntity.addQuery("label", "CONTAINS", '');
+		for (var idx = 0, cnt = ecLabel.length; idx < cnt; ++idx) {
+			qc2.addOrCondition("sys_package.name", "CONTAINS", ecLabel[idx]);
+	        qc2.addOrCondition("label", "CONTAINS", ecLabel[idx]);
+		    qc2.addOrCondition("name", "CONTAINS", ecLabel[idx]);
+		}
+		grSearchEntity.addQuery("sys_scope.scope", scope);
+
+		if(secureLevel === SECURE_ENTITIES) {
+			grSearchEntity.addQuery("name", "IN", enforcedEntityIds.join(","));
+		} else if(secureLevel === INSECURE_ENTITIES) {
+			grSearchEntity.addQuery("name", "NOT IN", enforcedEntityIds.join(","));
+		}
+
+		grSearchEntity.chooseWindow(startIndex, endIndex);
+		grSearchEntity.query();
+		var searchTable = [];
+		while (grSearchEntity.next())
+		{
+			var table_label = grSearchEntity.getValue("label");//display name of searching table
+			var table_name = grSearchEntity.getValue("name");//internal name of searching table
+			//var extendsTable = grSearchEntity.getValue("super_class");
+			var extendsTableName = grSearchEntity.super_class.name;		
+			var chose_by_default = false;
+		    for (var idx = 0, cnt = targetTable.length; idx < cnt; ++idx) {
+				if (extendsTableName == targetTable[idx]) {
+					chose_by_default = true;
+					break;
+				}
+			}
+			
+			if (!isBlackEntity(table_name, table_label)) {
+				searchTable.push({display_name:table_label, internal_name:table_name, active:false, willBeEnforced:chose_by_default});
+			}
+		}	
+		
+ 		var internalNames = '';
+ 		for (var i=0; i<searchTable.length; i++)
+ 		{
+ 			internalNames = internalNames + searchTable[i].internal_name + ',';
+ 		}
+		
+ 		var scopeName = gs.getCurrentScopeName();
+ 		var searchActiveEntity = new GlideRecord(scopeName+"_entitycolumn");
+ 		searchActiveEntity.addQuery("name", "IN", internalNames);
+ 		searchActiveEntity.query();
+ 		while (searchActiveEntity.next())
+ 		{
+ 			var activeEntityName = searchActiveEntity.getValue("name");
+ 			for (i=0; i<searchTable.length; i++)
+ 			{
+ 				if (activeEntityName == searchTable[i].internal_name)
+ 				{
+ 					searchTable[i].active = true;
+					break;
+ 				}
+ 			}
+ 		}
+		response.setBody({total_search_count:totalSearchCount, error:0, records:searchTable});
+	}	
+}
+
+/*
+更新enforce entity，即用户从页面选择新的enforce entity，并更新entitycolumns表
+*/
+function UpdateEntityInfo(requst,response)
+{
+	var requestData = request.body.data;
+	var entitiesTobeEnforced = requestData.func_arguments.active_entity_attributes;
+	var strScopeName = gs.getCurrentScopeName();
+	var enforceAttrTblName = strScopeName + '_entitycolumn';
+
+	var oldEntities = new GlideRecord(enforceAttrTblName);
+	oldEntities.query();
+	oldEntities.deleteMultiple();
+
+	if(Array.isArray(entitiesTobeEnforced) && entitiesTobeEnforced.length) {
+
+		entitiesTobeEnforced.forEach(function(entity){
+
+			var entityName = entity.internal_name;
+			var attrs = entity.attributes;
+
+			if(Array.isArray(attrs) && attrs.length) {
+
+				attrs.forEach(function(attr){
+					var attrTobeInserted = new GlideRecord(enforceAttrTblName);
+					attrTobeInserted.initialize();
+					attrTobeInserted.name = entityName;
+					attrTobeInserted.column = attr.name;
+					attrTobeInserted.label = attr.displayName;
+					attrTobeInserted.type = attr.type;
+					attrTobeInserted.is_reference = !!attr.is_reference;					
+					attrTobeInserted.insert();
+				});
+			}
+			else{
+				var emptyEntity = new GlideRecord(enforceAttrTblName);
+				emptyEntity.initialize();
+				emptyEntity.name = entityName;
+				emptyEntity.insert();
+			}
+		});
+	}
+	
+	var entitiesTobeCanceled = requestData.func_arguments.deselectedEntities;
+	if(Array.isArray(entitiesTobeCanceled)){
+		SEUtil.saveProperty('LastDeselectedEntities', JSON.stringify(entitiesTobeCanceled));
+	}
+
+	response.setBody({Message:"Success"});
+}
+
+/*
+	返回所有具有active attribute的entity信息
+*/
+function GetEnforceEntity(request, response)
+{
+	var enforcedEntities = {};
+	
+	//首先从EntityColumns表中获取所有active的entity内部名
+	var strScopeName = gs.getCurrentScopeName();
+    var customAttrTable = new GlideRecord(strScopeName+"_entitycolumn");
+    
+    customAttrTable.query();
+    
+	while (customAttrTable.next()){
+
+		var entityName = customAttrTable.getValue("name");
+        var attrId = customAttrTable.getValue("column_id");
+        var attrName = customAttrTable.getValue("column");
+        var attrDisplayName = customAttrTable.getValue("label");
+		var isAttrEnforce = customAttrTable.getValue("active");
+		var isReference = customAttrTable.getValue("is_reference").toString().toLowerCase() === '1' ? true : false;
+		var datatype = customAttrTable.getValue("type");
+        
+        if(!Array.isArray(enforcedEntities[entityName])){
+            enforcedEntities[entityName] = [];
+        }
+
+		if(attrName) {
+			enforcedEntities[entityName].push({
+				'column_id': attrName,
+				'column_name': attrName,
+				'column_label': attrDisplayName,
+				'active': !!isAttrEnforce,
+				'is_reference': !!isReference,
+				'type': datatype
+			});			
+		}
+	}
+	
+    //再从sys_db_object表中查询具体的entity信息
+    
+	if (Object.keys(enforcedEntities).length > 0)
+	{
+        var enforcedEntityInfos = {};
+        var entityRanges = Object.keys(enforcedEntities).join(',');
+		
+		var enforcedEntityTables = new GlideRecord("sys_db_object");
+		enforcedEntityTables.addQuery("name", "IN", entityRanges);
+		enforcedEntityTables.query();
+		
+		while (enforcedEntityTables.next())
+		{
+            enforcedEntityInfos[enforcedEntityTables.getValue("name")] = { displayName: enforcedEntityTables.getValue("label"), scope: enforcedEntityTables.sys_scope.scope };
+        }
+        
+        var entities = Object.keys(enforcedEntities).map(function(entityName){
+            return {
+                "internal_name": entityName,
+                "display_name": enforcedEntityInfos[entityName].displayName,
+                "scope": enforcedEntityInfos[entityName].scope,
+                "active": true,
+                "attributes": enforcedEntities[entityName]
+            };
+        });
+
+		response.setBody({enforce_entity:entities});
+    }
+    else{
+        response.setBody({enforce_entity:[]});
+    }
+}
+
+function GetScopeName(request, response)
+{
+	var scopeList = [];
+	var grScope = new GlideRecord("sys_scope");
+    var seRT = grScope.addNullQuery('private');
+    seRT.addOrCondition("private", "IN", "false");
+    grScope.query();
+	while (grScope.next())
+	{
+		var scopeName = grScope.getValue("name");
+		var scope = grScope.getValue("scope");
+		scopeList.push({scope:scope,name:scopeName});
+	}
+	response.setBody(scopeList);
+}
+
+(function process(/*RESTAPIRequest*/ request, /*RESTAPIResponse*/ response) {
+	// implement resource here
+	var requestData = request.body.data;
+	if (requestData.status)
+	{
+		var functionName = requestData.func_name;
+		if (functionName == "GetPaginationInfo")
+		{
+			GetPaginationInfo(request, response);
+		}
+		else if (functionName == "GetEntityInfo")
+		{
+			GetEntityInfo(request,response);
+		}
+		else if (functionName == "SearchEntityInfo")
+		{
+			SearchEntityInfo(request,response);
+		}
+		else if (functionName == "UpdateEntityInfo")
+		{
+			UpdateEntityInfo(request, response);
+		}
+		else if (functionName == "GetEnforceEntity")
+		{
+			GetEnforceEntity(request, response);
+		}
+		else if (functionName == "GetScopeName")
+		{
+			GetScopeName(request, response);
+		}
+		else if(functionName == 'GetEntityMetadata')
+		{
+			GetEntityMetadata(request, response);
+		}
+		else if(functionName == 'GetUnenforcedEntities') 
+		{
+			GetUnenforcedEntities(request, response);
+		}
+	}
+	else
+	{
+		var responseStatus = 400;
+		var responseError = "Invalid Request Parameter";
+		response.setBody({status:responseStatus,error:responseError});
+	}
+
+})(request, response);
+]]></operation_script>
+        <operation_uri>/api/x_230565_emsn/security_entities</operation_uri>
+        <produces>application/json,application/xml,text/xml</produces>
+        <produces_customized>false</produces_customized>
+        <relative_path>/</relative_path>
+        <request_example/>
+        <requires_acl_authorization>true</requires_acl_authorization>
+        <requires_authentication>true</requires_authentication>
+        <short_description/>
+        <sys_class_name>sys_ws_operation</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-16 03:00:37</sys_created_on>
+        <sys_id>0be3ff4c4fe607003ab4e9628110c75e</sys_id>
+        <sys_mod_count>141</sys_mod_count>
+        <sys_name>EntitySettings</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ws_operation_0be3ff4c4fe607003ab4e9628110c75e</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2018-11-02 09:31:24</sys_updated_on>
+        <web_service_definition display_value="security_entities">2fc37f4c4fe607003ab4e9628110c7b7</web_service_definition>
+        <web_service_version/>
+    </sys_ws_operation>
+</record_update>

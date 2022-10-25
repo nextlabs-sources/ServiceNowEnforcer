@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_push_notif_app_install">
+    <sys_push_notif_app_install action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <last_registered_on>2018-03-02 10:58:41</last_registered_on>
+        <sys_class_name>sys_push_notif_app_install</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-03-02 10:58:41</sys_created_on>
+        <sys_id>946f5f92dba01300dd2673278c9619bc</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>czKHF_Oh2nc:APA91bHUMhwXbXKx30AASaMkTHdjr8JIbEjel4tI6SX6QhMdd-E2r9nXUSejjQl40xRTxrhG5NVqq5-YrxzwuTPHfYhxkDeUfYpXiX4cEkODHuRGpYaa1hGJU09Ze0r9Zly_YjA9hW_u</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_push_application_id display_value="ServiceNow Mobile Application">ab704041ff1102009738ffffffffff33</sys_push_application_id>
+        <sys_push_platform_id display_value="Google">53e75f30ff0002009738ffffffffff12</sys_push_platform_id>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_push_notif_app_install_946f5f92dba01300dd2673278c9619bc</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2018-03-02 10:58:41</sys_updated_on>
+        <sys_user_id display_value="System Administrator">6816f79cc0a8016401c5a33be04be441</sys_user_id>
+        <token>czKHF_Oh2nc:APA91bHUMhwXbXKx30AASaMkTHdjr8JIbEjel4tI6SX6QhMdd-E2r9nXUSejjQl40xRTxrhG5NVqq5-YrxzwuTPHfYhxkDeUfYpXiX4cEkODHuRGpYaa1hGJU09Ze0r9Zly_YjA9hW_u</token>
+    </sys_push_notif_app_install>
+</record_update>

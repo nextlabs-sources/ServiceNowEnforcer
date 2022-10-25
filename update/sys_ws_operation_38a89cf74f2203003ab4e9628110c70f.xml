@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ws_operation">
+    <sys_ws_operation action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <consumes>application/json,application/xml,text/xml</consumes>
+        <consumes_customized>false</consumes_customized>
+        <default_operation_uri/>
+        <enforce_acl>a6dfe4cadb4f53009f989f5faa9619ca</enforce_acl>
+        <http_method>POST</http_method>
+        <name>UserAttributes</name>
+        <operation_script><![CDATA[var userAttrs = queryAllUserAttributes();
+
+function queryAllUserAttributes(){
+	var userAttrs = [];
+	var grDBUser = new GlideRecord('sys_dictionary');
+	grDBUser.addNotNullQuery('element');
+	grDBUser.addQuery('name', 'sys_user');
+	grDBUser.query();
+	while (grDBUser.next()) {
+		// gs.debug('{0}.{1}, Display name={2}, Type={3}, Mandatory={4}', grDBUser.name, grDBUser.element, grDBUser.sys_name, grDBUser.internal_type, grDBUser.mandatory);
+		userAttrs.push({
+			display: grDBUser.getValue('column_label'), name: grDBUser.getValue('element'), type: grDBUser.getValue('internal_type'),
+			active: false, mandatory: '1' === grDBUser.getValue('mandatory')
+		});
+	}
+	return userAttrs;
+}
+
+/**
+ * Applies the checked statuses from `strUserAttributes` to the `userDict`
+ * @param {string} strUserAttributes 
+ */
+function applyCheckedStatuses(strUserAttributes) {
+    var userAttributes = JSON.parse(strUserAttributes);
+    for (var i = 0; i < userAttributes.length; i++) {
+        for (var j = 0; j < userAttrs.length; j++) {
+            if (userAttributes[i].name == userAttrs[j].name) {
+                userAttrs[j].active = userAttributes[i].active;
+                break;
+            }
+        }
+    }
+}
+
+(function process(/*RESTAPIRequest*/ request, /*RESTAPIResponse*/ response) {
+    var requestData = request.body.data;
+    if (requestData.status) {
+        if (requestData.func_name == "GetUserAttributes") {
+            var strUserAttributes = gs.getProperty(gs.getCurrentScopeName() + ".UserAttributes", "");
+            //applyCheckedStatuses(strUserAttributes);
+            response.setBody({ user_attributes: strUserAttributes.toString() });
+        } else if (requestData.func_name == "SetUserAttributes") {
+            try {
+				var strUserAttrs = request.body.data.func_arguments.user_attributes;
+				SEUtil.debug('UserAttributes', strUserAttrs);
+				//applyCheckedStatuses(strUserAttrs);
+				var strNewUserAttribtues = strUserAttrs;
+				SEUtil.debug('UserAttributes', 'saveProperty=' + SEUtil.saveProperty('UserAttributes', strNewUserAttribtues));
+				response.setBody({ message: "success" });
+            } catch (e) {
+                response.setBody({ message: e.message });
+            }
+        }
+    }
+})(request, response);]]></operation_script>
+        <operation_uri>/api/x_230565_emsn/userattributes</operation_uri>
+        <produces>application/json,application/xml,text/xml</produces>
+        <produces_customized>false</produces_customized>
+        <relative_path>/</relative_path>
+        <request_example/>
+        <requires_acl_authorization>true</requires_acl_authorization>
+        <requires_authentication>true</requires_authentication>
+        <short_description/>
+        <sys_class_name>sys_ws_operation</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-27 02:37:04</sys_created_on>
+        <sys_id>38a89cf74f2203003ab4e9628110c70f</sys_id>
+        <sys_mod_count>39</sys_mod_count>
+        <sys_name>UserAttributes</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ws_operation_38a89cf74f2203003ab4e9628110c70f</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2018-07-17 09:41:31</sys_updated_on>
+        <web_service_definition display_value="UserAttributes">878894f74f2203003ab4e9628110c7f8</web_service_definition>
+        <web_service_version/>
+    </sys_ws_operation>
+</record_update>

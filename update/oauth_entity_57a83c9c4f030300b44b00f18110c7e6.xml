@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="oauth_entity">
+    <oauth_entity action="INSERT_OR_UPDATE">
+        <access>package_private</access>
+        <access_token_lifespan>1800</access_token_lifespan>
+        <active>true</active>
+        <auth_code_lifespan>0</auth_code_lifespan>
+        <auth_url>http://www.nextlabs.solutions:58080/dpc/authorization/pdp</auth_url>
+        <certificate_url/>
+        <client_id>apiclient</client_id>
+        <client_secret>5ipoT9GT3Cl7MaSa+EyjGA==</client_secret>
+        <client_uuid>d3a83c9c4f030300b44b00f18110c7e6</client_uuid>
+        <comments># Accessing PDP Rest API&#13;
+## Authentication&#13;
+The PDP REST API uses the OAuth 2.0 protocol for authentication. To use the REST API, you must obtain OAuth 2.0 client credentials from the Control Center OAuth server. Your client application then requests an access token from the Control Center OAuth Server, extracts the token from the response, and sends the token along with the request to the PDP Authorization API.&#13;
+&#13;
+### Request for Access Token&#13;
+Control Center supports OAuth2 Client Credentials Grant.&#13;
+&#13;
+#### Access Token Request Endpoint&#13;
+The endpoint used to make an an access an token request is : https://&lt;Control Center Host&gt;/cas/token&#13;
+&#13;
+#### Access Token Request&#13;
+The client application makes a request to the token endpoint by adding the following parameters using "application/x-www-form-urlencoded" with a character encoding of UTF-8 in the HTTP request entity-body:&#13;
+&#13;
+* grant_type REQUIRED. The value MUST be set to "client_credentials".&#13;
+* client_id REQUIRED. The API Client ID&#13;
+* client_secret REQUIRED. The API Client Secret.&#13;
+* expires_in OPTIONAL. If specified, the token returned expires in the seconds specified. Users can request tokens that are valid for a maximum of one year, which is 3600 * 24 * 365 seconds. If this parameter is omitted, the default value, 3600, is used.&#13;
+&#13;
+An example of the request:&#13;
+```&#13;
+POST /cas/token HTTP/1.1&#13;
+Host: cc-server.example.com&#13;
+Content-Type: application/x-www-form-urlencoded&#13;
+&#13;
+grant_type=client_credentials&amp;client_id=apiclient&amp;client_secret=ABCDEFGABCDEFG&#13;
+```&#13;
+&#13;
+#### Access Token Response&#13;
+If the access token request is valid and authorized, the OAuth Server issues an access token.&#13;
+&#13;
+An example of the response:&#13;
+```&#13;
+HTTP/1.1 200 OK&#13;
+{&#13;
+    "access_token":"2YotnFZFEjr1zCsicMWpAA",&#13;
+    "token_type":"Bearer",&#13;
+    "expires_in":3600,&#13;
+}&#13;
+```</comments>
+        <default_grant_type>client_credentials</default_grant_type>
+        <id_token_lifespan>0</id_token_lifespan>
+        <logo_url/>
+        <message_signature_lifespan>0</message_signature_lifespan>
+        <name>PDP OAuth2</name>
+        <oauth_api_script/>
+        <redirect_url>https://dev13020.service-now.com/oauth_redirect.do</redirect_url>
+        <refresh_token_lifespan>8640000</refresh_token_lifespan>
+        <revoke_token_url/>
+        <salt>0</salt>
+        <sys_class_name>oauth_entity</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-12-11 04:13:41</sys_created_on>
+        <sys_id>57a83c9c4f030300b44b00f18110c7e6</sys_id>
+        <sys_mod_count>1</sys_mod_count>
+        <sys_name>PDP OAuth2</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>oauth_entity_57a83c9c4f030300b44b00f18110c7e6</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2017-12-11 04:14:24</sys_updated_on>
+        <token_url>https://www.nextlabs.solutions/cas/token</token_url>
+        <type>oauth_provider</type>
+        <user/>
+    </oauth_entity>
+</record_update>

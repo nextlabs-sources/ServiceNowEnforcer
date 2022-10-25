@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ui_page">
+    <sys_ui_page action="INSERT_OR_UPDATE">
+        <category>general</category>
+        <client_script/>
+        <description>A wrapper UI page to show Pure HTML used as iframe in &lt;iframe id="gsft_main" allowfullscreen="true" main-pane="true" name="gsft_main" title="ServiceNow" src="home_splash.do?sysparm_direct=true" data-original-title="Main Content"/&gt;&#13;
+&#13;
+Query Parameter: name = Name of your UI Page&#13;
+&#13;
+See https://community.servicenow.com/community?id=community_blog&amp;sys_id=e26e22eddbd0dbc01dcaf3231f96196e, e.g. iframe.scr = instance.service-now.com/x_230565_emsn_GeneralSettings.do?sysparm_direct=true&#13;
+&#13;
+Expose variable(s) to the Client Browser:&#13;
+&lt;script type="text/javascript"&gt;&#13;
+ 	window.appScopeName = "${jvar_uiPageName}"; // e.g. SecuredEntities&#13;
+&lt;/script&gt;</description>
+        <direct>false</direct>
+        <endpoint>x_230565_emsn_iframe.do</endpoint>
+        <html><![CDATA[<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly trim="false" xmlns:j="jelly:core" xmlns:g="glide" xmlns:j2="null" xmlns:g2="null">
+    <g:evaluate var="jvar_uiPageName" expression="RP.getParameterValue('name')"/>
+    <j:if test="${jvar_uiPageName == 'SecuredEntities' || jvar_uiPageName == 'UserAttributes'}">
+        <g:evaluate var="jvar_appScopeName" expression="gs.getCurrentScopeName()"/>
+        <g:evaluate var="jvar_myScopeSysId" jelly="true">
+            // gs.getCurrentScopeName: Gets the name of the current scope.
+            var grScope = new GlideRecord('sys_scope');
+            if (grScope.get('scope', gs.getCurrentScopeName())) {
+                SEUtil.debug('UIPage.iframe', '{0}: DisplayName={1}, AppScopeId={2}, sys_id={3}', jelly.jvar_uiPageName, grScope.name, grScope.scope, grScope.sys_id);
+            }
+            grScope.getValue('sys_id');
+        </g:evaluate>
+        <script type="text/javascript">
+            (function (win) {
+                var appScopeName = "${jvar_appScopeName}"; // e.g. x_123456_app
+                win.MY_SCOPE_NAME = "${gs.getCurrentScopeName()}"; // e.g. x_123456_app
+                win.MY_SCOPE_SYSID = "${jvar_myScopeSysId}"; // e.g. 0123456789abcdef0123456789abcdef
+                win.BIZ_Q_PREFIX = "${SEUtil.BIZ_Q_PREFIX}";
+                win.BIZ_IU_PREFIX = "${SEUtil.BIZ_IU_PREFIX}";
+            })(window);
+			function renderCustomizeACLPage(differnce) {
+				$j('#nxl_iframe').attr('src', 'x_230565_emsn_CustomizeACL.do').one('load', function() {
+					var win = this.contentWindow || this.contentDocument;
+					win.renderEntities(differnce.added, differnce.removed);
+				});
+			}
+        </script>
+    </j:if>
+    <iframe id="nxl_iframe" src="x_230565_emsn_${jvar_uiPageName}.do?sysparm_direct=true" style="border: 0; width: 100%; height: calc(100vh - 56px); overflow: hidden;"></iframe>
+</j:jelly>]]></html>
+        <name>iframe</name>
+        <processing_script/>
+        <sys_class_name>sys_ui_page</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-10-16 06:28:36</sys_created_on>
+        <sys_id>c19a20f3db4d2300ec3a9b81ca961988</sys_id>
+        <sys_mod_count>5</sys_mod_count>
+        <sys_name>iframe</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ui_page_c19a20f3db4d2300ec3a9b81ca961988</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-01-17 10:52:10</sys_updated_on>
+    </sys_ui_page>
+</record_update>

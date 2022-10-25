@@ -1,0 +1,542 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>package_private</access>
+        <active>true</active>
+        <api_name>x_230565_emsn.PolicyAgent</api_name>
+        <client_callable>false</client_callable>
+        <description>An local implementation of Policy Evaluator for Policy Decision Point (PDP) new PolicyAgent().decide();&#13;
+&#13;
+https://en.wikipedia.org/wiki/XACML&#13;
+https://docs.servicenow.com/bundle/jakarta-platform-administration/page/administer/contextual-security/concept/access-control-rules.html</description>
+        <name>PolicyAgent</name>
+        <script><![CDATA[/** @example new PolicyAgent().decide(new UserStack(), 'INCIDENT_EDIT', new EntityStack(new GlideRecordSecure('incident')));  */
+var PolicyAgent = Class.create();
+PolicyAgent.prototype = {
+    initialize: function () {},
+    /**
+     * Evaluates the authorization request with subject, action, and resource.
+     * @param {UserStack} subject user attributes.
+     * @param {string} action The short name of policy action in Policy Model acting as a filter criteria, its format is ENTITY_VIEW /
+     *  ENTITY_EDIT / ENTITY_CREATE / ENTITY_DELETE, where ENTITY is uppercase version of table name (not display name).
+     * @param {EntityStack} resource resource attributes, here, in ServiceNow, which come from column field values of a record.
+     * @return {PolicyResponse} The authorization evaluation result
+     */
+    decide: function (subject, action, resource) {
+        // 1. Query Policy
+        // Retrieves rows from the database with the column field action containing the specific Action.
+        // e.g. use the condition gr.addQuery('actions', 'CONTAINS', 'INCIDENT_EDIT')
+        // Query policy based on userId and action.
+
+        var policies = this.selectPolicy(action);
+        // var idx, policyCount = policies.length;
+        // var matchingPolicies = [];
+        // for (idx = 0; idx < policyCount; ++idx) {
+        //     if (x_230565_emsn.Decision.evalPolicy(policies[idx], resource, subject)) {
+        //         matchingPolicies.push(policies[idx]);
+        //     }
+        // }
+
+        var decision = Decision.evalPolicys(policies, resource, subject);
+
+        // https://docs.servicenow.com/bundle/london-platform-administration/page/administer/field-administration/task/t_SelectTheDisplayValue.html
+        // String GlideRecord.getClassDisplayValue() Returns the table's label.
+        // String GlideRecord.getDisplayValue() Retrieves the display value for the current record.
+        // String GlideRecord.getRecordClassName() Retrieves the class name for the current record.
+        // if (current != null) {
+        //     SEUtil.debug('PolicyAgent.decide', 'action={0}|User@{1} ({2}) operated {3}@{4} ({5})|decision={6} based on policies={7}', [
+        //         action, gs.getUserID(), gs.getUserName(), current.getClassDisplayValue(), current.sys_id, current.getDisplayValue(),
+        //         decision, //JSON.stringify(policies, null, ' ')
+        //     ]);
+        // }
+
+        return decision;
+
+        // 2. Filter Policy based on the component conditions in rules
+        // Gets the policies matching the attribute criteria by evaluating subject and resource condition.
+        // e.g. Subject Components: In ( User_name_is_admin OR User_city_is_HZ ) AND Not In (User_department_is_Market)
+        //    Resource Components: In ("incident.assigned_to.name is don.goodliffe" OR "priority is 4")
+
+        // 3. ADVANCED CONDITIONS
+        // The tooltip show us the UserManual on Web Console: Conditions that enhance policy evaluation. Policy authors
+        // can extend policy evaluation by defining conditional expressions that cannot be defined using components. For
+        // example, if a third-party system needs to provide input into policy evaluation, you could construct an expression
+        // that invokes the external system using the following syntax call_function("Service_Name", "Function_Name", ). For
+        // example, call_function("SECURITY", "Check classification", user.classification, "TOP SECRET")= "yes"
+
+        // 4. Decide the initial decision and the effective policies in matching policies
+        // Policies whose effect is Deny have a high priority, and other effect policies will be discarded.
+        // If any Deny effect policies exist, the result is Deny, otherwise, it's Permit.
+        // The tooltip of Policy Effect show us the UserManual on Web Console: The intended consequence of a satisfied rule,
+        // for example, Allow or Deny.
+        // @see https://en.wikipedia.org/wiki/XACML#Combining_algorithms
+
+        // 5. Reaches a decision (Permit / Deny / NotApplicable / Indeterminate)
+        // If the effective policies are empty, the final decision is NotApplicable; otherwise,
+        // If the initial decision is Deny, the final decision is Deny; otherwise,
+        // If the initial decision is Allow, the final decision is Allow.
+
+        // 6. Build the result and returns it to the PEP
+        // Iterate through the effective policies to merge their obligations.
+    },
+
+    /**
+     * Retrieves policies from the database with the column field `action` containing the specific `action`. e.g. its output is visualized like
+     * `https://instaceName.service-now.com/x_230565_emsn_nxl_policies_list.do?sysparm_query=actionLIKEINCIDENT_VIEW`.
+     * @private
+     * @param {string} action The short name of policy action in Policy Model
+     * @return {Policy[]} the policy list matching the specified `action`
+     */
+    selectPolicy: function (action) {
+        var policies = [];
+        var grPolicy = new GlideRecordSecure('x_230565_emsn_nxl_policies');
+        grPolicy.addQuery('action', 'CONTAINS', action);
+        grPolicy.query();
+        while (grPolicy.next()) {
+            var strPolicy = grPolicy.getValue('policy');
+            var policy = JSON.parse(strPolicy);
+            policies.push(policy);
+        }
+        return policies;
+    },
+
+    /**
+     * Evaluates the authorization request with subject, action, and resource only for Before-Query Business Rules
+     * @param {string} action The short name of policy action in Policy Model acting as a filter criteria, its format is ENTITY_VIEW /
+     *  ENTITY_EDIT / ENTITY_CREATE / ENTITY_DELETE, where ENTITY is uppercase version of table name (not display name).
+     * @param {AttributeStack} [user] A key-value pairs of user attributes, which is the information about a user performing an access. Its component format is "key=value".
+     * @param {GlideRecord|AttributeStack} [resource] (Optional) If other than empty, evaluate this given resource, otherwise, evaluate the record specified by the predefined global
+     *  variable `current` in ServiceNow. A key-value pairs in component format "key=value".
+     * @return {DecisionResult} The authorization evaluation result
+     * @example new x_230565_emsn.PolicyAgent().decideBusinessRule('INCIDENT_VIEW');
+     */
+    decideBusinessRule: function (action, user, resource) {
+        /** @type {DecisionResult} */
+        var retval = {};
+        var policies = this.selectPolicy(action);
+        if (policies.length) {
+            var result = Decision.getObligationsBySubject(policies, resource, user);
+            if (result) {
+                // There are effective policies whose subject components are matched
+                if (result.record_filter || result.OwnerAlwaysAllow) {
+                    // 1. We need to filter records regardless of Deny or Allow
+                    retval = result;
+                } else if (result.Allowed) {
+                    // 2. We don't do filter, users will see all records
+                    retval.Allowed = true;
+                }
+                // else 3. Deny and no filter obligations, users won't see any records
+            }
+            // else 3. no effective policies, users won't see any records
+            SEUtil.debug('PolicyAgent#decideBusinessRule', 'DecisionResult={0} based on policies={1}', result ? JSON.stringify(result) : '', JSON.stringify(policies));
+        }
+        // 3. We do a specific filter, users won't see any records
+        return retval;
+    },
+
+    type: 'PolicyAgent'
+};
+
+/**
+ * Variable Scope defining some base methods and not contains any own value properties.  
+ * A scope is a set of variable objects. Evaluation requires a scope for top-level variable storage as well as a place
+ * to find standard objects like `Function` and `Object` in string expresion `new Function('a', 'b', 'return a + b');`
+ * or `Object.assign({}, { a: 1 });`.
+ * @see https://developer.mozilla.org/en-US/docs/Mozilla/Projects/Rhino/Scopes_and_Contexts#Scopes
+ * @see https://struts.apache.org/maven/struts2-core/apidocs/com/opensymphony/xwork2/ognl/OgnlValueStack.html
+ * @see https://docs.spring.io/spring-framework/docs/4.3.x/spring-framework-reference/html/expressions.html#expressions-evaluation-context
+ * @see https://docs.spring.io/spring-framework/docs/5.1.x/spring-framework-reference/core.html#expressions-evaluation-context
+ */
+function ValueScope() {}
+ValueScope.prototype.get = function (name) {
+    return this[name];
+};
+// ValueScope.new = function (values) { return Object.assign(new ValueScope(), values); }
+
+/**
+ * @class ComponentStack
+ * A Variable Scope which extends `ValueScope` with a backend data source and a cache
+ * @see https://stackoverflow.com/questions/20424226/easy-way-to-set-javascript-object-multilevel-property
+ * @see https://docs.servicenow.com/bundle/geneva-servicenow-platform/page/use/navigation/concept/c_DotWalking.html
+ */
+var ComponentStack = Class.create();
+ComponentStack.prototype = {
+    /**
+     * @param {GlideRecord|GlideRecordSecure} record a backend data source. Here, it's an instance of `GlideRecord` or `GlideRecordSecure`
+     *  in ServerNow.
+     */
+    initialize: function (record) {
+        /** @type {GlideRecord} */
+        this.record = record;
+        /** @type {Object.<string, object>} */
+        this.cache = {};
+        // /** @type {string} */ this.separator;
+    },
+
+    /**
+     * Retrieves the value of the field with the specified `name`, of an user record.
+     * @param {string|string[]} name the name of the attribute whose value you want to get.
+     * @return {*} the value of a specified attribute on the user. If the given field is not selected in the User Attributes web page,
+     * 	the returned value will be `undefined`. If it does not exist, the value returned will either be null or "" (the empty string);
+     */
+    get: function (name) {
+        var value = this.getCacheValue(name);
+        // SEUtil.debug('ComponentStack', 'getCacheValue({0})={1}', name, value);
+        // https://stackoverflow.com/questions/135448/how-do-i-check-if-an-object-has-a-property-in-javascript
+        if (undefined === value) {
+            // the given field is not selected in the User Attributes web page
+            // SEUtil.error('Enforcer.checkRecord', sequenceId + '{0} not exists in table {1}', subCmp.field, gr.getTableName());
+            return undefined; // throw Error('the user attribute ' + name + ' is not selected');
+        }
+        if (ComponentStack.SELECTED_ATTRIBUTE === value) {
+            value = this.getValue(name); //  `ComponentStack.INVALID_ATTRIBUTE`
+        }
+        return value;
+    },
+
+    /**
+     * Retrieves the value of the attribute with the specified `key`,  while falling back to the specified default value `alternative`
+     * if the attribute access fails.
+     * 
+     * Note it also will update the cache only once if the backend data source if there is no column field with that key.
+     * @protected
+     * @param {string} key the key name of the cached attribute whose value you want to get.
+     * @param {any} [alternative] a default value.
+     */
+    getValue: function (key, alternative) {
+        var value = SEUtil.derefGet(this.record, key, this.separator);
+        if (undefined !== value) {
+            this.cache[key] = value;
+        } else {
+            // the given field does not exist in the table
+            if (1 === arguments.length) {
+                alternative = null;
+            }
+            this.cache[key] = alternative;
+            value = alternative;
+        }
+        return value;
+    },
+
+    /**
+     * Add or update an attribute to the cache.
+     * @protected
+     * @param {string} key the key name of the cached attribute whose value you want to set.
+     * @param {any|ComponentStack.SELECTED_ATTRIBUTE} [value] the value you want to set.
+     */
+    setCacheValue: function (key, value) {
+        // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Working_with_Objects#Objects_and_properties
+        // `myCar.nonexistent_key; // undefined` Unassigned properties of an object are undefined (and not null).
+        // So, Use an unique object `ComponentStack.SELECTED_ATTRIBUTE` to indicate the attribute can be cached but has not yet been stashed.
+        this.cache[key] = value || ComponentStack.SELECTED_ATTRIBUTE;
+    },
+
+    /**
+     * Retrieves the value from the cache.
+     * @protected
+     * @param {string} key the key name of the cached attribute whose value you want to get.
+     * @param {any} `undefined` the attribute cannot be cached because the admin user hasn't selected any attributes in the User Attributes or 
+     * Secure Entities page. `ComponentStack.SELECTED_ATTRIBUTE` indicates admin selected the attribute and can be cached but has not yet been
+     * stashed.
+     */
+    getCacheValue: function (key) {
+        return this.cache[key];
+    },
+
+    type: 'ComponentStack'
+};
+/** 
+ * A cache-specific value indicates the attribute cannot be cached because the admin user hasn't selected any attributes in the User 
+ * Attributes or Secure Entities page
+ */
+ComponentStack.SELECTED_ATTRIBUTE = new Object('SELECTED_ATTRIBUTE');
+/** 
+ * A cache-specific value indicates the attribute is an invalid column field in the table (it doesn't exist or its access is secured
+ * by ServiceNow).
+ */
+ComponentStack.INVALID_ATTRIBUTE = new Object('INVALID_ATTRIBUTE');
+
+PolicyAgent.ComponentStack = ComponentStack; // Conveniently expose `ComponentStack` module to reference once in other Server Script files
+
+/**
+ * A wrapper class of user attributes on the ServiceNow user table record (an instance of `GlideRecord` or `GlideRecordSecure`).
+ * @class UserStack
+ * @example PolicyAgent;
+var userStack = new UserStack();
+gs.debug('name={0}, department.name={1}', userStack.get-('name'), userStack.get-('department.name'));
+gs.debug('userStack.cache = {0}', JSON.stringify(userStack.cache));
+
+var userStack2 = new UserStack();
+var name2types = userStack2.cacheAllNow();
+for (var name in name2types) {
+    // var value = userStack2.cache[name];
+    // var value = userStack2.get-(name);
+    var value = userStack2.getValue(name);
+    // `typeof value` is always "object", in fact, it's an object of type GlideElement.
+    gs.debug('userStack.cache[{0}] (typeof={1}, {2}) = {3}', name, typeof value, name2types[name], value);
+}
+
+PolicyAgent; gs.debug(JSON.stringify(new UserStack().toCEAttributes()));
+ */
+var UserStack = Class.create();
+UserStack.prototype = Object.extendsObject(ComponentStack, {
+    /**
+     * The constructor returns the user object associated with the passed-in user ID (sys_id in sys_user) or user_name.
+     * @param {string} [userId] Unique ID (sys_id) or user_name of the desired user record. By default, it is the unique ID (`sys_id`) of the current user (`gs.getUserID()`)
+     */
+    initialize: function (userId) {
+        ComponentStack.prototype.initialize.call(this);
+        this.userID = userId;
+        // See https://english.stackexchange.com/questions/118935/generic-word-for-hyphen-dash-minus-sign-etc
+        // '-'.charCodeAt(0).toString(16) HYPHEN-MINUS ( U+002D )
+        this.separator = '-'; // see also the table UserAttributes.column_name
+    },
+
+    /**
+     * @param {string} key the key name of the cached attribute whose value you want to get.
+     * @param {any} `undefined` the attribute cannot be cached because the admin user hasn't selected any attributes in the User Attributes or 
+     * Secure Entities page. `ComponentStack.SELECTED_ATTRIBUTE` indicates admin selected the attribute and can be cached but has not yet been
+     * stashed.
+     */
+    getCacheValue: function (key) {
+        if (null == this.record) {
+            this.initSelectedAttributes();
+        }
+        return this.cache[key];
+    },
+
+    initSelectedAttributes: function () {
+        var grUser = new GlideRecordSecure('sys_user');
+        // this.record = grUser.get-(userId || gs.getUserID()) ? grUser : {};
+
+        // Get user object associated with the specified sys_id or user_name.
+        if (grUser.get(this.userID || gs.getUserID())) {
+            this.record = grUser;
+        } else {
+            this.record = grUser; // {};
+        }
+
+        var userAttrs = SEUtil.getProperty('UserAttributes');
+        // gs.nil(Object o): Queries an object and returns true if the object is null, undefined, or contains an empty string.
+        if (gs.nil(userAttrs) && !userAttrs.length) {
+            throw Error('No user attributes are selected');
+        }
+        userAttrs = JSON.parse(userAttrs);
+
+        var name2types = {};
+        for (var idx = 0, len = userAttrs.length; idx < len; ++idx) {
+            var userAttr = userAttrs[idx];
+            if (!userAttr.active) continue;
+            if (userAttr.active) {
+                var fieldName = userAttr.column_name; // note column field separator is a hyphen character ("-", decimal code 45)
+                this.setCacheValue(fieldName);
+                name2types[fieldName] = userAttr.type;
+            }
+        }
+        this.name2types = name2types;
+        SEUtil.debug('UserStack.initSelectedAttributes', 'name2types={0}', JSON.stringify(this.cache));
+    },
+
+    /**
+     * Query the selected attributes information and user table, and cache all values of those attributes accordingly.
+     * @return {object} the selected attribute information: name to type
+     */
+    cacheAllNow: function () {
+        if (null == this.record) {
+            this.initSelectedAttributes();
+        }
+        var record = this.record,
+            separator = this.separator,
+            cache = this.cache;
+        for (var name in this.name2types) {
+            var value = SEUtil.derefGet(record, name, separator);
+            if (undefined !== value) {
+                cache[name] = value;
+            }
+        }
+        return this.name2types;
+    },
+
+    toCEAttributes: function () {
+        if (null == this.record) {
+            this.initSelectedAttributes();
+        }
+        CommunicateWithCCAndPC;
+        var ceAttrs = new CEAttres();
+        var name2types = this.name2types;
+        // name format looks like "TableAColumn1-TableAColumn1-TableCColumn2", .e.g "department-name"
+        for (var name in name2types) {
+            if ('name' !== name) { // Skip it because we have added it as name of CEUser, see also CEUser(id, name, ceAttrsOfUser) in CommunicateWithCCAndPC
+                var value = this['get'](name);
+                if (!gs.nil(value)) {
+                    value = value.toString();
+                }
+                // gs.info('[-_^]USER: {0} = {1}', name, value);
+                if (!gs.nil(value)) {
+                    var ceAttrType = name2types[name];
+                    switch (ceAttrType) {
+                        case 'boolean':
+                            ceAttrType = CEAttributeType.XACML_Boolean;
+                            break;
+                        case 'number':
+                            ceAttrType = Math.floor(value) === value ? CEAttributeType.XACML_Integer : CEAttributeType.XACML_Double;
+                            break;
+                        default:
+                            ceAttrType = CEAttributeType.XACML_String;
+                            break; // throw 'unsupported currently';
+                    }
+                    if (ceAttrType) {
+                        // gs.info('[-_^]CEAttribute {0} ({1}) = {2}', name, ceAttrType, value);
+                        ceAttrs.Add_Attre(name, value, ceAttrType);
+                    }
+                }
+            }
+        }
+        return ceAttrs;
+    },
+
+    type: 'UserStack'
+});
+
+/** 
+ * A wrapper class of resource attributes on the ServiceNow entity table record (an instance of `GlideRecord` or `GlideRecordSecure`).
+ * @class EntityStack
+ * @example PolicyAgent;
+var gr = new GlideRecordSecure('incident');
+gr.query();
+if (gr.next()) {
+	var resStack = new EntityStack(gr);
+	gs.debug(resStack.get-('number'));
+}
+ */
+var EntityStack = Class.create();
+EntityStack.prototype = Object.extendsObject(ComponentStack, {
+    /**
+     * @param {GlideRecord} record 
+     */
+    initialize: function (record) {
+        ComponentStack.prototype.initialize.call(this, record);
+    },
+
+    /**
+     * @param {string} key the key name of the cached attribute whose value you want to get.
+     * @param {any} value
+     */
+    setCacheValue: function (key, value) {
+        if (this.selectedAttrs[key]) {
+            this.cache[key] = value;
+        }
+    },
+
+    /**
+     * @param {string} key the key name of the cached attribute whose value you want to get.
+     * @param {any} `undefined` the attribute cannot be cached because the admin user hasn't selected any attributes in the User Attributes or 
+     * Secure Entities page. `ComponentStack.SELECTED_ATTRIBUTE` indicates admin selected the attribute and can be cached but has not yet been
+     * stashed.
+     */
+    getCacheValue: function (key) {
+        if (null == this.selectedAttrs) {
+            // Retrieves all field names of a specific entity.
+            var fieldName;
+            var fieldAttrs = {};
+            var grColumn = new GlideRecordSecure(SEUtil.MY_SCOPE_NAME + '_entitycolumn');
+            grColumn.addQuery('name', this.record.getTableName());
+            grColumn.query();
+            while (grColumn.next()) {
+                fieldName = grColumn.getValue('column');
+                SEUtil.debug('ResourceStack.getCacheValue', 'fieldName={0}, grColumn.column={1}', fieldName, grColumn.column);
+                if (!gs.nil(grColumn.column)) {
+                    fieldAttrs[fieldName] = grColumn.getValue('type');
+                }
+            }
+            SEUtil.debug('ResourceStack.getCacheValue', 'fieldAttrs={0}', JSON.stringify(fieldAttrs));
+            this.selectedAttrs = fieldAttrs;
+        }
+        if (this.selectedAttrs[key]) {
+            var value = this.cache[key];
+            if (undefined === value) {
+                value = this.getValue(key);
+            }
+            return value;
+        } else {
+            return undefined;
+        }
+    },
+
+    type: 'EntityStack'
+});
+
+
+/**
+ * Provides access to an object's properties by using the dot-walking notation `path` (a chain of property names separated by dots
+ * (periods) or an array of property names). If the input `path` is `string` type, optionally, a separator can be specified. Similar, 
+ * to C++, Java, Javascript, the default separator for member access is `.`.  
+ * The '.' for member access is considered a separator (punctuator), not an operator in Java (See the [Java Language Specification
+ * sections 3.11 and 3.12](https://docs.oracle.com/javase/specs/jls/se7/html/jls-3.html#jls-3.11) for a list of all separators and
+ * operators.)
+ * @private
+ * @param {Object} object The object to query.
+ * @param {string[]|string} path The path of the property to get.
+ * @param {string} [separator] the separator of the path, by default, dot/period `.`, 
+ * @returns {any} Returns the resolved value.
+ * @see https://stackoverflow.com/questions/9088304/is-the-for-member-access-considered-an-operator-in-java
+ * @see https://en.cppreference.com/w/cpp/language/operator_member_access#Built-in_member_access_operators
+ * @see https://docs.microsoft.com/en-us/cpp/cpp/member-access-operators-dot-and?view=vs-2017
+ * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Property_Accessors
+ * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_Precedence (Computed Member Access)
+ * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Object_initializer#Computed_property_names
+ * @see https://stackoverflow.com/questions/20424226/easy-way-to-set-javascript-object-multilevel-property
+ * @see https://docs.servicenow.com/bundle/geneva-servicenow-platform/page/use/navigation/concept/c_DotWalking.html
+ */
+function derefGet(object, path, separator) {
+    if (!Array.isArray(path)) {
+        path = path.split(separator || '.');
+    }
+    //inspect the property path array against {object}
+    var index = 0,
+        length = path.length;
+    while (object != null && index < length) {
+        object = object[path[index++]]; // Computed Member Access (JavaScript Bracket notation)
+    }
+    return (index && index == length) ? object : undefined;
+}
+
+/**
+ * Object.<string, any[]>} {Allowed: boolean|null, record_filter?: FilterCondition[][], AlwaysAllowOwner?: boolean } 
+ * @typedef {Obligations} DecisionResult PolicyResponse
+ * @property {boolean|null} [Denied] The access decision denotes whether access to the resource is rejected/blocked/denied: `false` only if the policy
+ *  decision is 'Permit' to indicate access is approved, otherwise, `true` ('Deny' / 'NotApplicable' / 'Indeterminate').
+ * @property {boolean|null} Allowed The access decision denotes whether access to the resource is approved/allowed/granted: `true` only if the policy
+ *  decision is 'Permit' to indicate access is approved, otherwise, `false` ('Deny' / 'NotApplicable' / 'Indeterminate' and no matching policies).
+ * @see https://stackoverflow.com/questions/36737921/how-to-extend-a-typedef-parameter-in-jsdoc
+ */
+
+/**
+ * All the kinds of obligations defined. In fact, it's a map object using an unique obligation name as the key and an array of its obligation 
+ * parameters object from different policies as the value. For example,
+ * `{AlwaysAllowOwner: [true], record_filter: [{field1: 'name', oper1: '=', value1: 'admin'}, {field1: 'name', oper1: '=', value1: 'admin'}]}`
+ * 
+ * Note those keywords are reserved and cannot be used as obligation name identifiers: `log`, `Denied`, `Allowed`.
+ * 
+ * @typedef Obligations
+ * @type {Object}
+ * @property {boolean} [AlwaysAllowOwner]
+ * @property {FilterCondition[][]} [record_filter] a nested filter condition obligation array of two dimensions, those relations can be logically
+ *  joined using the logical operators AND then OR ( i.e. ([0][0] AND [0][1] AND [0][2]) OR ([1][0] AND [1][1] AND [1][2]) ).
+ * @see PolicyResponse
+ * @see https://en.wikipedia.org/wiki/XACML#Obligations
+ */]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-10-10 06:21:50</sys_created_on>
+        <sys_id>61cf61f5db0d2300ec3a9b81ca961913</sys_id>
+        <sys_mod_count>30</sys_mod_count>
+        <sys_name>PolicyAgent</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy>read</sys_policy>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_script_include_61cf61f5db0d2300ec3a9b81ca961913</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-01-19 10:10:21</sys_updated_on>
+    </sys_script_include>
+</record_update>

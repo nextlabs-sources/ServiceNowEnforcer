@@ -1,0 +1,486 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ui_script">
+    <sys_ui_script action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <description/>
+        <global>false</global>
+        <name>x_230565_emsn.general-settings</name>
+        <script><![CDATA[/// <reference path='./typings/util.d.ts' />
+/// <reference path='./typings/gs-vm.d.ts' />
+
+(function () {
+    //class alias
+    var util = window.nxl.util;
+    var $ = util.$;
+    var $$ = util.$$;
+    var sdk = window.nxl.sdk;
+    var fetchData = sdk.fetchFactory('PDPApi');
+
+    var TEST_CONN_SUCCESS = '√ Connection established successfully.';
+    var TEST_CONN_FAIL = 'X Connection could not be established.';
+    var TEST_CONN_PC_HOST_INVALID = 'Please input correct policy controller server address.';
+    var TEST_CONN_PC_PORT_INVALID = 'Please input correct policy controller server port.';
+    var TEST_CONN_OAUTH_HOST_INVALID = 'Please input correct Control Center server address.';
+    var TEST_CONN_OAUTH_PORT_INVALID = 'Please input correct Control Center server port.';
+
+    var REQUEST_STATUS_SUCCESS = 0;
+    var REQUEST_MSG_SUCCESS = 'OK';
+
+    var modelBackup = {};
+    var log = window.parent.jslog;
+
+    //#region entry point
+    (function init() {
+
+        initListeners();
+
+        getGSData().then(function (data) {
+
+            modelBackup = data;
+
+            var vm = gsViewModelAdapter(data);
+            bindGSViewModelToView(vm);
+
+        }).catch(function (e) {
+            log(e);
+            alert(e.message);
+        });
+
+    })();
+
+    function initListeners() {
+
+        var topbarHomeBtn = $('#topbarHomeBtn');
+        var topbarSaveBtn = $('#topbarSaveBtn');
+        var topbarDiscardBtn = $('#topbarDiscardBtn');
+        var gsTestConnBtn = $('#testConnectionBtn');
+        var gsSaveBtn = $('#gsSaveBtn');
+        var gsDiscardBtn = $('#gsDiscardBtn');
+        var hostEl = $('#host');
+        var userNameEl = $('#userName');
+        var passwordEl = $('#password');
+        var clientIdEl = $('#clientId');
+        var clientKeyEl = $('#clientKey');
+        // var syncBtn = $('#syncBtn')
+
+        if (
+            topbarHomeBtn && topbarSaveBtn && topbarDiscardBtn &&
+            gsTestConnBtn && gsSaveBtn && gsDiscardBtn &&
+            hostEl && userNameEl && passwordEl && clientIdEl && clientKeyEl) {
+
+            topbarHomeBtn.onclick = homeHandler.bind(this);
+            topbarSaveBtn.onclick = saveHandler.bind(this);
+            topbarDiscardBtn.onclick = discardHandler.bind(this);
+
+            gsTestConnBtn.onclick = testConnHandler.bind(this);
+            gsSaveBtn.onclick = saveHandler.bind(this);
+            gsDiscardBtn.onclick = discardHandler.bind(this);
+
+            hostEl.oninput = reEnableTestBtnHandler;
+            userNameEl.oninput = reEnableTestBtnHandler;
+            passwordEl.oninput = reEnableTestBtnHandler;
+            clientIdEl.oninput = reEnableTestBtnHandler;
+            clientKeyEl.oninput = reEnableTestBtnHandler;
+            // syncBtn.onclick = syncPolicyHandler.bind(this);
+        } else {
+            log('initListeners failed');
+        }
+
+    };
+    //#endregion
+
+    //#region event handlers
+    function testConnHandler(evt) {
+        log('testConnHandler executed');
+
+        evt.preventDefault();
+        evt.target.disabled = true;
+
+        var vm = getGSViewModelFromView();
+        log(vm);
+
+        if (isHostValid(vm.host)) {
+            var model = testConnModelAdapter(vm);
+
+            postTestData(model).then(function (data) {
+
+                var vm = testConnViewModelAdapter(data);
+                bindTestConnViewModelToView(vm);
+                reEnableTestBtnHandler(null);
+
+            }).catch(function (e) {
+                log(e);
+                reEnableTestBtnHandler(null);
+            });
+        } else {
+            showConnectErrorMsg(TEST_CONN_PC_HOST_INVALID);
+        }
+    }
+
+    function saveHandler(evt) {
+        log('saveHandler executed');
+        evt.preventDefault();
+
+        var vm = getGSViewModelFromView();
+        log(vm);
+
+        var model = gsModelAdapter(vm);
+
+        postGSData(model).then(function (data) {
+
+            log(data);
+
+            var payload = data.xml && data.xml.answer;
+
+            if (!payload || payload.message !== REQUEST_MSG_SUCCESS || Number(payload.status) !== REQUEST_STATUS_SUCCESS) {
+
+                var msg = util.format('postGSData failed: {0}', payload && payload.message);
+                log(msg);
+                throw new Error(msg);
+            }
+
+            util.reloadPage();
+
+        }).catch(function (e) {
+
+            log(e);
+            alert(e.message);
+
+        });
+    }
+
+    function discardHandler(evt) {
+        log('discardHandler executed');
+        evt.preventDefault();
+
+        var vm = gsViewModelAdapter(modelBackup);
+        log(vm);
+        bindGSViewModelToView(vm);
+        reEnableTestBtnHandler(null);
+    }
+
+    function homeHandler(evt) {
+        log('homeHandler executed');
+        //window.location.href = window.location.href + '/..';
+    }
+
+    function reEnableTestBtnHandler(evt) {
+        var gsTestConnBtn = $('#testConnectionBtn');
+
+        if (gsTestConnBtn) {
+            gsTestConnBtn.disabled = false;
+        } else {
+            log('test connection btn can not be found');
+        }
+    }
+
+    function syncPolicyHandler(evt) {
+        var btn = $('#syncBtn')
+        var msg = btn && btn.nextElementSibling
+        if (btn && msg) {
+            btn.disabled = true
+            btn.classList.add('btn-disabled')
+            btn.nextElementSibling.classList.remove('hide')
+            postSyncDirective()
+                .catch(function (err) {
+                    log(err.message)
+                })
+        } else {
+            log('sync policy failed, element can not be found')
+        }
+    }
+    //#endregion
+
+    //#region inner tools
+
+    /**
+     * 
+     * @param {string} url 
+     * @return {boolean}
+     */
+    function isHostValid(url) {
+
+        var isValid = true;
+        var urlReg = /(https|http)?(?:\:\/\/)?([a-zA-Z0-9\-.]+)(?:\:)?(\d+)?(\/[a-zA-Z0-9.\-_~!$&'()*+,;=:@/%]+)?\??/i;
+        var matches = urlReg.exec(url) || [];
+        var schema = matches[1];
+        var host = matches[2];
+        var port = matches[3];
+        var path = matches[4];
+
+        if (!host || schema || port || path) {
+            isValid = false;
+        }
+
+        return isValid;
+    }
+
+    /**
+     * 
+     * @param {string} port 
+     * @return {boolean}
+     */
+    function isPortValid(port) {
+        var isValid = true;
+
+        if (!port) {
+            isValid = false;
+        }
+
+        if (isNaN(Number(port))) {
+            isValid = false;
+        }
+
+        return isValid;
+    }
+
+    function showConnectErrorMsg(msg) {
+
+        var vm = {
+            success: false,
+            statusDesc: msg,
+        }
+
+        bindTestConnViewModelToView(vm);
+    }
+
+    //#endregion
+
+    //#region restful api
+
+    /**
+     * get general setting data
+     * @return {object} - the general setting data structure defined in restful api 
+     */
+    function getGSData() {
+        //your code here...
+        var resource = 'getSetting';
+        return fetchData(resource);
+    }
+
+    /**
+     * post general setting data
+     * @param { object } model - the general setting data structure defined in restful api 
+     */
+    function postGSData(model) {
+        log(model);
+        //your code here...
+        var resource = 'saveSetting';
+        return fetchData(resource, model);
+    }
+
+    /**
+     * post test connection data
+     * @param { object } model - the test connection data structure defined in restful api 
+     */
+    function postTestData(model) {
+        log(model);
+        //your code here...
+        var resource = 'testConnection';
+        return fetchData(resource, model);
+    }
+
+    function postSyncDirective() {
+        var resource = 'syncPolicies'
+        return fetchData(resource)
+    }
+    //#endregion
+
+    //#region adapters
+    /**
+     * convert general settings model from backend to GeneralSettingViewModel
+     * @param {any} model 
+     * @returns {GeneralSettingsViewModel}
+     */
+    function gsViewModelAdapter(model) {
+        var payload = model.xml && model.xml.answer;
+        if (!payload) {
+            log('gsViewModelAdapter failed, payload null');
+            return {};
+        }
+        return _apiAdapter(payload);
+    }
+
+    /**
+     * convert GeneralSettingsViewModel to backend model
+     * @param {GeneralSettingsViewModel} vm 
+     * @returns {any}
+     */
+    function gsModelAdapter(vm) {
+        return _apiAdapter(vm);
+    }
+
+    /**
+     * convert test connection backend model from backend to TestConnectionViewModel
+     * @param {any} model 
+     * @returns {TestConnectionViewModel}
+     */
+    function testConnViewModelAdapter(model) {
+        var vm = {};
+        //your code here...
+
+        var payload = model.xml && model.xml.answer;
+        var isSuccess = true;
+        var message = [];
+
+        if (Array.isArray(payload)) {
+
+            payload.forEach(function (item) {
+                if (!item || Number(item.status) !== REQUEST_STATUS_SUCCESS || item.message !== REQUEST_MSG_SUCCESS) {
+                    isSuccess = false;
+                    item && message.push(item.message);
+                }
+            })
+
+            vm.success = isSuccess;
+            vm.statusDesc = isSuccess ? '' : TEST_CONN_FAIL;
+
+        } else {
+            log('testConnViewModelAdapter failed, payload null');
+            vm.success = false;
+            vm.statusDesc = TEST_CONN_FAIL;
+        }
+
+        log(message.join('\n'))
+
+        return vm;
+    }
+
+    /**
+     * convert TestConnectionViewModel to backend model
+     * @param {GeneralSettingsViewModel} vm 
+     * @returns {any}
+     */
+    function testConnModelAdapter(vm) {
+        return _apiAdapter(vm, true);
+    }
+    //#endregion
+
+    //#region MISC
+
+    /**
+     * @param {BackendObject|FrontendObject} obj all property names are in lowercase for a `BackendObject`
+     * @param {Boolean} [toBackend] convert `obj` to a `BackendObject` object, otherwise, convert `obj` to a `FrontendObject` object
+     * @return {BackendObject|FrontendObject} the input `obj` passed in or a new Object.
+     */
+    function _apiAdapter(obj, toBackend) {
+        return obj;
+    }
+
+    /**
+     * Two-Way Binding: updates the view whenever the model changes and updates data model whenever the view changes by users
+     * @param {FrontendObject} vm update View `if(vm)`, otherwise, update data
+     * @return {FrontendObject} new `FrontendObject` if `Boolean(vm)` is `false` or the `FrontendObject` `vm` passed in
+     */
+    function _present(vm) {
+        var hostEl = $('#host');
+        var usernameEl = $('#username');
+        var passwordEl = $('#password');
+        var clientIdEl = $('#clientId');
+        var clientKeyEl = $('#clientKey');
+        if (hostEl && usernameEl && passwordEl && clientIdEl && clientKeyEl) {
+            if (vm) {
+                hostEl.value = vm.host || '';
+                usernameEl.value = vm.username || '';
+                passwordEl.value = vm.password || '';
+                clientIdEl.value = vm.clientid || '';
+                clientKeyEl.value = vm.clientkey || '';
+            } else {
+                vm = {};
+                vm.host = hostEl.value || '';
+                vm.username = usernameEl.value || '';
+                vm.password = passwordEl.value || '';
+                vm.clientid = clientIdEl.value || '';
+                vm.clientkey = clientKeyEl.value || '';
+            }
+            return vm;
+        }
+    }
+
+    /**
+     * bind general settings viewmodel to view
+     * @param {GeneralSettingsViewModel} vm 
+     */
+    function bindGSViewModelToView(vm) {
+        if (!_present(vm)) {
+            log('bindGSViewModelToView failed, elements not found');
+        }
+    }
+
+    /**
+     * bind test connection response viewmodel to view
+     * @param {TestConnectionViewModel} vm 
+     */
+    function bindTestConnViewModelToView(vm) {
+
+        var testConnErrorMsgEl = $('#testConnnectionError');
+        var testConnSuccessMsgEl = $('#testConnnectionMsg');
+
+        if (testConnErrorMsgEl && testConnSuccessMsgEl) {
+
+            if (vm.success) {
+                testConnErrorMsgEl.classList.add('hide');
+                testConnSuccessMsgEl.classList.remove('hide');
+                testConnSuccessMsgEl.innerHTML = TEST_CONN_SUCCESS;
+            } else {
+                testConnErrorMsgEl.classList.remove('hide');
+                testConnSuccessMsgEl.classList.add('hide');
+                testConnErrorMsgEl.innerHTML = vm.statusDesc;
+            }
+        } else {
+            log('bindTestConnViewModelToView failed, elements not found');
+        }
+    }
+
+    /**
+     * get general settings viewmodel
+     * @returns {GeneralSettingsViewModel}
+     */
+    function getGSViewModelFromView() {
+        var vm = _present();
+        if (!vm) {
+            log('bindGSViewModelToView failed, elements not found');
+            return {};
+        }
+        return vm;
+    }
+    
+    /**
+     * The data model Object in frontend.
+     * @typedef FrontendObject
+     * @type {object}
+     * @property {string} host - a Host matching `/\(https?:\/\/)?domain(/path)?/`.
+     * @property {string} username - Login username to Policy Configuration
+     * @property {string} password - Login password to Policy Configuration
+     * @property {string} clientid - client ID for JPC OAuth2.0 
+     * @property {string} clientKey - Client Secret Key for JPC OAuth2.0
+     */
+    /**
+     * The data model Object in frontend.
+     * @typedef BackendObject
+     * @type {object}
+     * @property {string} host - a Host matching `/\(https?:\/\/)?domain(/path)?/`.
+     * @property {string} username - Login username to Policy Configuration
+     * @property {string} password - Login password to Policy Configuration
+     * @property {string} clientid - client ID for JPC OAuth2.0 
+     * @property {string} clientKey - Client Secret Key for JPC OAuth2.0
+     */
+
+    //#endregion
+})()]]></script>
+        <script_name>general-settings</script_name>
+        <sys_class_name>sys_ui_script</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-06 08:08:52</sys_created_on>
+        <sys_id>ffcf1dc14f9203003ab4e9628110c7d9</sys_id>
+        <sys_mod_count>40</sys_mod_count>
+        <sys_name>x_230565_emsn.general-settings</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ui_script_ffcf1dc14f9203003ab4e9628110c7d9</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2018-09-27 11:19:34</sys_updated_on>
+        <use_scoped_format>false</use_scoped_format>
+    </sys_ui_script>
+</record_update>

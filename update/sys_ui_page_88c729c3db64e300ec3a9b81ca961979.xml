@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ui_page">
+    <sys_ui_page action="INSERT_OR_UPDATE">
+        <category>general</category>
+        <client_script><![CDATA[if(consoleTicketURL){	
+	if (consoleTicketURL == "about:blank") {
+	  	$j('#message').text('Please double check host on the General Settings page.');
+	}else if (consoleTicketURL == "invalid username/password") {
+		$j('#message').text('Please double check username && password on the General Settings page.');
+	}
+	else 
+		window.location.href = consoleTicketURL;	  
+}	
+else
+	$j('#message').text('Please complete NextLabs Platform Configuration on the General Settings page.');]]></client_script>
+        <description>Policy Configuration. Use a iframe (e.g. src=https://sfcc1.crm.nextlabs.solutions/console?sysparm_direct=true, https://azure-dev-cc/console/#/Dashboard, https://${gs.getProperty('x_230565_emsn.PCHost')}/console) to show the Nextlabs Web Console page.</description>
+        <direct>false</direct>
+        <endpoint>x_230565_emsn_configure_policy.do</endpoint>
+        <html><![CDATA[<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly trim="false" xmlns:j="jelly:core" xmlns:g="glide" xmlns:j2="null" xmlns:g2="null">
+<h1 id="message">Loading...</h1>
+<script>
+	var consoleTicketURL = "${SEUtil.getConsoleTicketURLOverRestHttp('about:blank')}";
+</script>
+</j:jelly>]]></html>
+        <name>configure_policy</name>
+        <processing_script><![CDATA[//[UI Pages](https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/script/server-scripting/reference/r_UIPages.html?title=UI_Pages#gsc.tab=0)
+// https://docs.servicenow.com/bundle/london-application-development/page/script/server-scripting/reference/r_UIPages.html
+//[Scoped GlideSession](http://wiki.servicenow.com/index.php?title=Scoped_GlideSession_API_Reference#gsc.tab=0)
+
+//Processing Script: This script runs on the server when the page is submitted. This is mainly useful if your page has a form (defined with the <g:ui_form/> or <g:form/> tags).
+(function onSubmit() {
+	gs.debug('[^_^]configure_policy sync');
+})();]]></processing_script>
+        <sys_class_name>sys_ui_page</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-09-19 06:57:48</sys_created_on>
+        <sys_id>88c729c3db64e300ec3a9b81ca961979</sys_id>
+        <sys_mod_count>71</sys_mod_count>
+        <sys_name>configure_policy</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ui_page_88c729c3db64e300ec3a9b81ca961979</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-01-10 06:17:28</sys_updated_on>
+    </sys_ui_page>
+</record_update>

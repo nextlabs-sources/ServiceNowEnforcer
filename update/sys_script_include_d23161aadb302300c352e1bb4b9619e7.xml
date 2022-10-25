@@ -1,0 +1,1014 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>public</access>
+        <active>true</active>
+        <api_name>x_230565_emsn.CommunicateWithWebConsole</api_name>
+        <client_callable>false</client_callable>
+        <description>Communicate with Web Console to sync policy</description>
+        <name>CommunicateWithWebConsole</name>
+        <script><![CDATA[/**
+ * A HttpClient interacts with Web Console using its ControlCenter v8.6.0 RESTful API
+ * @class CommunicateWithWebConsole
+ * @property {string} userName the login username to Web Console for Policy Configuration
+ * @property {string} password the login password to Web Console for Policy Configuration
+ * @property {string} origin the Console URL origin string includes the protocol, the domain and optionally the port of the URL.
+ * @property {string} cookie the client session cookie after successully logining in Console 
+ */
+var CommunicateWithWebConsole = Class.create();
+CommunicateWithWebConsole.prototype = {
+    initialize: function () {},
+
+    type: 'CommunicateWithWebConsole',
+
+    LoginWebConsole: function (strConsoleUrl, strUserName, strPassword) {
+        var msg = new sn_ws.RESTMessageV2();
+        msg.setEndpoint("https://proxy.pep.cloudaz.com/cchelp/CCLoginHelp/AutoLogin");
+        msg.setHttpMethod("POST");
+        msg.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+
+        var postData = "consoleurl=" + encodeURI(strConsoleUrl);
+        postData = postData + "&username=" + strUserName;
+        postData = postData + "&password=" + strPassword;
+        msg.setRequestBody(postData);
+
+        var response = msg.execute();
+        return response.getBody();
+    },
+
+    SendPostRequestToConsole: function (strUrl, strCookie, strDataType, strPostData) {
+        var msg = new sn_ws.RESTMessageV2();
+        msg.setEndpoint(strUrl);
+        msg.setHttpMethod("POST");
+        msg.setRequestHeader("cookie", strCookie);
+        msg.setRequestHeader("Content-Type", strDataType);
+        msg.setRequestBody(strPostData);
+        var response = msg.execute();
+        return response.getBody();
+    },
+
+    SendGetRequestToConsole: function (strUrl, strCookie) {
+        var msg = new sn_ws.RESTMessageV2();
+        msg.setEndpoint(strUrl);
+        msg.setHttpMethod("GET");
+        msg.setRequestHeader("cookie", strCookie);
+        var response = msg.execute();
+        return response.getBody();
+    },
+
+    /**
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                              href                                              │
+├──────────┬──┬─────────────────────┬────────────────────────┬───────────────────────────┬───────┤
+│ protocol │  │        auth         │          host          │           path            │ hash  │
+│          │  │                     ├─────────────────┬──────┼──────────┬────────────────┤       │
+│          │  │                     │    hostname     │ port │ pathname │     search     │       │
+│          │  │                     │                 │      │          ├─┬──────────────┤       │
+│          │  │                     │                 │      │          │ │    query     │       │
+"  https:   //    user   :   pass   @ sub.example.com : 8080   /p/a/t/h  ?  query=string   #hash "
+│          │  │          │          │    hostname     │ port │          │                │       │
+│          │  │          │          ├─────────────────┴──────┤          │                │       │
+│ protocol │  │ username │ password │          host          │          │                │       │
+├──────────┴──┼──────────┴──────────┼────────────────────────┤          │                │       │
+│   origin    │                     │         origin         │ pathname │     search     │ hash  │
+├─────────────┴─────────────────────┴────────────────────────┴──────────┴────────────────┴───────┤
+│                                              href                                              │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘
+(all spaces in the "" line should be ignored - they are purely for formatting)
+```
+     * Set the Console URL origin string includes the protocol, the domain and optionally the port of the URL.
+     * Set the username and password property.
+     * @see https://developer.mozilla.org/en-US/docs/Web/API/HTMLHyperlinkElementUtils/origin
+     * @see https://nodejs.org/api/url.html#url_url_strings_and_url_objects
+     */
+    loadSettings: function () {
+        var hosts, host = SEUtil.getProperty('Host');
+
+        if (!host) return;
+
+        hosts = SEUtil.buildCCAndJPCHosts(host);
+        this.origin = 'https://' + hosts.cc;
+        this.userName = SEUtil.getProperty('UserName');
+        this.password = SEUtil.getProperty('Password');
+        /**
+         * fully qualified uri string used as the base url. Most useful with `request.defaults`, for example when you want to do many
+         * requests to the same domain. If `baseUrl` is `https://example.com/api/`, then requesting `/end/point?test=tru`e will fetch
+         * `https://example.com/api/end/point?test=true`. When `baseUrl` is given, `uri` must also be a string.
+         * @property {string}
+         */
+        this.baseAPIUrl = this.origin + '/console/api/v1/';
+        /**
+         * @property {string} - e.g. JSESSIONID=0123456789ABCDEF0123456789ABCDEF; Path=/console; Secure; HttpOnly
+         */
+        this.cookie = ''; // undefined
+    },
+
+    /**
+     * Get the RESTful URL to List Policy Model
+     * @path POST policyModel/search
+     */
+    getQueryPolicyModel: function () { // GetQueryPolicyModelAPI
+        return this.baseAPIUrl + 'policyModel/search';
+    },
+    /**
+     * Get the RESTful URL to Retrieve Policy Model
+     * @path GET policyModel/mgmt/active/{id} 
+     */
+    getQueryPolicyModelDetail: function (id) { // GetQueryPolicyModelDetailAPI
+        return this.baseAPIUrl + 'policyModel/mgmt/active/' + id;
+    },
+    /**
+     * Get the RESTful URL to Modify Policy Model
+     * @path PUT policyModel/mgmt/modify
+     */
+    getModifyPolicyModel: function () { // GetModifyPolicyModelAPI
+        return this.baseAPIUrl + 'policyModel/mgmt/modify';
+    },
+    /**
+     * Get the RESTful URL to Create Policy Model
+     * @path POST policyModel/mgmt/add
+     */
+    getAddPolicyModel: function () { // GetAddPolicyModelAPI
+        return this.baseAPIUrl + 'policyModel/mgmt/add';
+    },
+    /**
+     * Get the RESTful URL to List Policy
+     * @path POST policy/search
+     */
+    getSearchPolicy: function () { // GetSearchPolicyAPI
+        return this.baseAPIUrl + 'policy/search';
+    },
+    /**
+     * Get the RESTful URL to Retrieves Policy
+     * @path GET policy/mgmt/active/{id}
+     */
+    getQueryPolicyDetail: function (id) { // GetQueryPolicyDetailAPI
+        return this.baseAPIUrl + 'policy/mgmt/active/' + id;
+    },
+    /**
+     * Get the RESTful URL to Retrieve Component
+     * @path GET /component/mgmt/active/{id}
+     */
+    getQueryComponentDetail: function (id) { // GetQueryComponentDetailAPI
+        return this.baseAPIUrl + 'component/mgmt/active/' + id;
+    },
+	/*
+	 *Get the RESTful URL to Retrieve operator id
+	 *@path GET /config/dataType/list/{STRING|NUMBER|MULTIVAL}
+	 **/
+	getOperatorIdForObligation: function(type){
+		return this.baseAPIUrl + 'config/dataType/list/' + type;
+	},
+
+    /**
+     * Note CORS
+     * @see https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/Synchronous_and_Asynchronous_Requests#Synchronous_request
+     */
+    syncSendInBrowser: function (strMethod, strUrl, strData, strDataType) {
+        var request = new XMLHttpRequest();
+        // Note browsers will output [Deprecation] Synchronous XMLHttpRequest on the main thread is deprecated because of its detrimental effects to the
+        // end user's experience. For more help, check https://xhr.spec.whatwg.org/#the-open()-method
+        request.open(strMethod, strUrl, false); // `false` makes the request synchronous
+        request.setRequestHeader('Cookie', this.cookie);
+        if (strData) { // 'POST' == strMethod || 'PUT' == strMethod
+            request.setRequestHeader('Content-Type', strDataType || 'application/x-www-form-urlencoded');
+            request.setRequestHeader('Content-Length', strData.length);
+        }
+        request.send(strData);
+        gs.debug('request.status = ' + request.status + ', request.responseText = ' + request.responseText);
+        if (request.status === 200) {
+            return request.responseText;
+        }
+    },
+    // nodejs
+    syncSend: function (strMethod, strUrl, strData, strDataType) {
+        var headers = {};
+        if (this.cookie) {
+            headers['Cookie'] = this.cookie;
+        }
+        if (strData) {
+            headers['Content-Type'] = strDataType || 'application/x-www-form-urlencoded';
+            headers['Content-Length'] = Buffer.byteLength(strData);
+        }
+        // A Response object.
+        var strRE, reObject = syncRequest(strMethod, strUrl, {
+            headers: headers,
+            body: strData
+        });
+        //  Note that even for status codes that represent an error, the request function will still return a response. You can call getBody
+        // if you want to error on invalid status codes. The response has the following properties:
+        // statusCode - a number representing the HTTP status code
+        // headers - http response headers
+        // body - a string if in the browser or a buffer if on the server
+        // It also has a method res.getBody(encoding?) which may throw an Error {statusCode: string, headers: Object, body: string|Buffer}:
+        if (200 == reObject.statusCode) {
+            strRE = reObject.getBody('utf8');
+            // console.log('strRE ==> ', strRE);
+        } else {
+            console.log('statusCode: ', reObject.statusCode);
+            console.log('headers: ', reObject.headers);
+            console.log('body:', reObject.body);
+            strRE = reObject.body.toString("utf8");
+        }
+        return strRE;
+    },
+
+    /**
+     * @param {string} strMethod http method (default: "GET")
+     * @param {string} strUrl fully qualified uri
+     * @param {string} [strData] entity body for PATCH, POST and PUT requests.
+     * @param {string} [strDataType]
+     */
+    send: function (strMethod, strUrl, strData, strDataType) {
+        var msg = new sn_ws.RESTMessageV2();
+        msg.setEndpoint(strUrl);
+        msg.setHttpMethod(strMethod);
+        if (this.cookie) {
+            msg.setRequestHeader('Cookie', this.cookie);
+        }
+        if (strData) { // 'POST' == strMethod || 'PUT' == strMethod
+            msg.setRequestHeader('Content-Type', strDataType || 'application/x-www-form-urlencoded');
+        }
+        msg.setRequestBody(strData);
+        var response = msg.execute(); // block call
+        return response.getBody();
+    },
+
+    sendGetRequest: function (strUrl) {
+        this.getCookie();
+        return this.send('GET', strUrl);
+    },
+    sendPostRequest: function (strUrl, strDataType, strPostData) {
+        this.getCookie();
+        return this.send('POST', strUrl, strPostData, strDataType);
+    },
+    sendPutRequest: function (strUrl, strDataType, strPostData) {
+        this.getCookie();
+        return this.send('PUT', strUrl, strPostData, strDataType);
+    },
+    loginWebConsole: function (url, username, password) {
+        var postData = 'consoleurl=' + url; // encodeURI(strConsoleUrl);
+        postData += '&username=' + username;
+        postData += '&password=' + password;
+        return this.send('POST', 'https://proxy.pep.cloudaz.com/cchelp/CCLoginHelp/AutoLogin', postData);
+    },
+    getCookie: function () {
+        if (!this.cookie) {
+            this.cookie = this.loginWebConsole(this.origin + '/console', this.userName, this.password);
+            SEUtil.debug('getCookie', this.cookie);
+        }
+        return this.cookie;
+    },
+
+    SyncPolicyModel: function (policyContent) {
+        gs.debug('SyncPolicyModel|ENTRY');
+        /// Load the Local Policy Model resource information
+        /** @type {PolicyModelResult} */
+        var policyModelInfo = JSON.parse(policyContent);
+        /** @type {PolicyModel[]} */
+        var localPolicyModels = policyModelInfo.policyModels;
+		//  query policy model from cc By pagination
+        /// Fetch the Remote Policy Model resource
+        /*var strPostData = '{"criteria":{"fields":[{"field":"type","type":"MULTI","value":{"type":"String","value":["RESOURCE","SUBJECT"]}}],"sortFields":[{"field":"type","order":"DESC"},{"field":"lastUpdatedDate","order":"DESC"}],"pageNo":0,"pageSize":20}}';*/
+		var strPostData = {
+	criteria: {
+		fields: [{
+			field: "type",
+			type: "MULTI",
+			value: {
+				type: "String",
+				value: ["RESOURCE", "SUBJECT"]
+			}
+		}],
+		sortFields: [{
+			field: "type",
+			order: "DESC"
+		}, {
+			field: "lastUpdatedDate",
+			order: "DESC"
+		}],
+		pageNo: 0,
+		pageSize: 20
+	}
+};
+		var nPageNum = 0;
+		var pagesize = 20;
+		var policyModels = new Array();
+		while(true){
+	  strPostData.criteria.pageNo = nPageNum;
+	   strPostData.criteria.pageSize = pagesize;
+	var strAPISerarchPolicyModel = this.getQueryPolicyModel();
+	var policyModelResponseText = this.sendPostRequest(strAPISerarchPolicyModel, ContentType_JSON_UTF_8, JSON.stringify(strPostData));		
+	if (!policyModelResponseText) {
+		SEUtil.error('CommunicateWithWebConsole.SyncPolicyModel', 'Failed to get policyModel list from {0}', strAPISerarchPolicyModel);	
+		return false;
+		}
+		/** @type {PolicyModelSearchResult} */
+			var policyModelSearchResult = JSON.parse(policyModelResponseText);
+			for(var index = 0;index < policyModelSearchResult.data.length;index++){
+				policyModels.push(policyModelSearchResult.data[index]);
+			}
+			if(policyModelSearchResult.totalPages == policyModelSearchResult.pageNo+1){
+				break;
+			}
+			nPageNum++;
+			/// Do difference comparison
+		}
+		
+        /*var strAPISerarchPolicyModel = this.getQueryPolicyModel();
+        var policyModelResponseText = this.sendPostRequest(strAPISerarchPolicyModel, ContentType_JSON_UTF_8, strPostData);
+        /** @type {PolicyModelSearchResult} */
+       /* var policyModelSearchResult = JSON.parse(policyModelResponseText);
+        var policyModels = policyModelSearchResult.data;*/
+        /// Do difference comparison
+
+        SEUtil.debug('WebConsole#SyncPolicyModel', 'policy model entity names on local and remote: [' + mapShortName(localPolicyModels) + '] vs [' + mapShortName(policyModels) + ']');
+        var isHaved = false; // whether both the local and the remote have the same shortName of policy model
+        for (var idxLocal = localPolicyModels.length; --idxLocal >= 0;) {
+			// get operator id
+			this.GetOperatorData();
+            var localPolicyModel = localPolicyModels[idxLocal]; // LocalPolicyModel.PolicyModelsItem
+            var policyModelName = localPolicyModel.shortName;
+            for (var idxRemote = policyModels.length; --idxRemote >= 0;) {
+                var policymodel = policyModels[idxRemote];
+                if (policyModelName == policymodel.shortName) {
+                    isHaved = true;
+                    // to check modify necessary
+                    this.CheckModifyPossibly(policymodel.id, localPolicyModel);
+                }
+            }
+            if (!isHaved) {
+                // the model is new,to do add
+                SEUtil.debug('WebConsole#SyncPolicyModel|new model entity {0} need adding', policyModelName);
+                this.AddPolicyModel(localPolicyModel);
+            }
+            isHaved = false;
+        }
+        gs.debug('SyncPolicyModel|LEAVE');
+        return true;
+    },
+    /**
+     * @param {PolicyModel} localModel 
+     */
+    AddPolicyModel: function (localModel) {
+        gs.debug('AddPolicyModel|start!');
+        gs.debug('AddPolicyModel|localModel:' + localModel);
+        /** @type {PolicyModel} */
+        var modelData = {
+            id: null,
+            name: localModel.name,
+            shortName: localModel.shortName,
+            description: localModel.description || 'Policy Model for ServiceNow Table ' + localModel.name + ' [' + localModel.shortName + ']',
+            type: localModel.type,
+            status: localModel.status,
+            version: null,
+            tags: [new TagItem(171, 'classified', 'classified', 'POLICY_MODEL_TAG', 'ACTIVE')],
+            attributes: [],
+            actions: [],
+            obligations: []
+        };        
+            this.SetPolicyModelAttr(localModel.attributes, 0, modelData);
+            var idx, cnt;
+            var newActions = modelData.actions;
+            for (localActions = localModel.actions, idx = 0, cnt = localActions.length; idx < cnt; idx++) {
+                newActions.push({
+                    id: null,
+                    name: localActions[idx].name,
+                    shortName: localActions[idx].shortName,
+                    sortOrder: idx
+                });
+            }
+            for (localObligations = localModel.obligations, idx = 0, cnt = localObligations.length; idx < cnt; idx++) {
+                this.AddObligations(modelData, localObligations[idx], idx);
+            }       
+        var addData = JSON.stringify(modelData);
+        gs.debug('AddPolicyModel|addData = ' + addData);
+
+        var strAPIAddPolicyModel = this.getAddPolicyModel();
+        var result = this.sendPostRequest(strAPIAddPolicyModel, ContentType_JSON_UTF_8, addData);
+        gs.debug('AddPolicyModel|end! ' + result);
+    },
+    /**
+     * @param {number} id 
+     * @param {PolicyModel} localModel 
+     */
+    CheckModifyPossibly: function (id, localModel) {
+        var strAPISerarchPolicyModelDetail = this.getQueryPolicyModelDetail(id);
+        var strPolicyModelResult = this.sendGetRequest(strAPISerarchPolicyModelDetail);
+        /** @type {PolicyModelResult} */
+        var policyModelDetail = JSON.parse(strPolicyModelResult);
+        var policyModelData = policyModelDetail.data;
+
+        // gs.debug('CheckModifyPossibly|retrieved policy model:' + strPolicyModelResult);
+
+        var isHaved = false;
+        var attributeArray = []; // LocalPolicyModel.AttributesItem
+        var localAttributes = localModel.attributes,
+            remoteAttributes = policyModelData.attributes;
+
+        SEUtil.debug('WebConsole#CheckModifyPossibly', 'policy model entity attributes on local and remote: [' + mapShortName(localAttributes) + '] vs [' + mapShortName(remoteAttributes) + ']');
+
+        for (var idxLocal = 0; idxLocal < localAttributes.length; idxLocal++) {
+            var localAttr = localAttributes[idxLocal];
+            for (var idxRemote = 0; idxRemote < remoteAttributes.length; idxRemote++) {
+                var remoteAttr = remoteAttributes[idxRemote];
+                if (localAttr.shortName == remoteAttr.shortName && localAttr.dataType == remoteAttr.dataType) {
+                    isHaved = true;
+                }
+            }
+            if (!isHaved) {
+                // add attribute
+                attributeArray.push(localAttr);
+            }
+            isHaved = false;
+        }
+        if (attributeArray.length) {
+            SEUtil.debug('WebConsole#CheckModifyPossibly', 'add new attributes: ' + mapShortName(attributeArray));
+            this.ModifyPolicyModel(attributeArray, localModel, policyModelData);
+        }
+        SEUtil.debug('WebConsole#ModifyPolicyModel', 'local: {0}, {1}, {2}', localModel.id, localModel.shortName, localModel.description);
+        SEUtil.debug('WebConsole#ModifyPolicyModel', 'remote: {0}, {1}, {2}', policyModelData.id, policyModelData.shortName, policyModelData.description);
+    },
+    /**
+     * @param {AttributeItem[]} attributeArray the new added attributes
+     * @param {PolicyModel} localModel 
+     * @param {PolicyModel} policyModelData remote policy model
+     */
+    ModifyPolicyModel: function (attributeArray, localModel, policyModelData) {
+        var idx;
+        SEUtil.debug('WebConsole#ModifyPolicyModel', 'add attribute start: {0}, {1}, {2}', policyModelData.id, policyModelData.shortName, policyModelData.description);
+        /** @type {PolicyModel} */
+        var modelData = {
+            id: policyModelData.id,
+            name: policyModelData.name,
+            shortName: policyModelData.shortName,
+            description: policyModelData.description || 'Policy Model for ServiceNow Table ' + policyModelData.name + ' [' + policyModelData.shortName + ']',
+            type: policyModelData.type,
+            status: policyModelData.status,
+            version: policyModelData.version,
+            tags: [new TagItem(171, 'classified', 'classified', 'POLICY_MODEL_TAG', 'ACTIVE')],
+            obligations: []
+        };
+
+        // Copy attributes of the remote policy model to new created attributes of new modelData
+        var remoteAttributes = policyModelData.attributes;
+        /** @type {AttributeItem[]} */
+        var attributes = [];
+        modelData.attributes = attributes;
+        for (idx = 0; idx < remoteAttributes.length; idx++) {
+            /** @type {AttributeItem} */
+            var attribute = remoteAttributes[idx];
+            attributes.push({
+                id: null,
+                name: attribute.name,
+                shortName: attribute.shortName,
+                dataType: attribute.dataType,
+                regExPattern: null,
+                sortOrder: attribute.sortOrder,
+                operatorConfigs: attribute.operatorConfigs,
+            });
+        }
+
+        // Continue coping new added attributes of the remote policy model to new created attributes of new modelData
+        this.SetPolicyModelAttr(attributeArray, 1 + attributes.length, modelData);
+
+        var localModelActions = localModel.actions;
+        var remoteModelActions = policyModelData.actions;
+
+        /** @type {ActionItem[]} */
+        var actions = [];
+        modelData.actions = actions;
+        var isHaved = false;
+        for (idx = 0; idx < localModelActions.length; idx++) {
+            var localAction = localModel.actions[idx];
+            for (var jdx = 0; jdx < remoteModelActions.length; jdx++) {
+                if (localAction.shortName == remoteModelActions[jdx].shortName) {
+                    isHaved = true;
+                }
+            }
+            if (!isHaved) {
+                actions.push(new ActionItem(null, localAction.name, localAction.shortName, localAction.sortOrder));
+            }
+            isHaved = false;
+        }
+        for (idx = 0; idx < remoteModelActions.length; idx++) {
+            var remoteAction = remoteModelActions[idx];
+            actions.push(new ActionItem(remoteAction.id, remoteAction.name, remoteAction.shortName, remoteAction.sortOrder));
+        }
+
+        this.ModifyObligations(modelData, policyModelData.obligations, localModel);
+        var strAddData = JSON.stringify(modelData);
+        // gs.debug('ModifyPolicyModel|addData:' + strAddData);
+        var strAPIModifyPolicyModel = this.getModifyPolicyModel();
+        var result = this.sendPutRequest(strAPIModifyPolicyModel, ContentType_JSON_UTF_8, strAddData);
+        gs.debug('ModifyPolicyModel|modify result :' + result);
+    },
+    /**
+     * Copy source attributes and add they to the attributes of `modelData`
+     * @param {AttributeItem[]} sourceAttributes 
+     * @param {number} order 
+     * @param {PolicyModel} modelData 
+     */
+    SetPolicyModelAttr: function (sourceAttributes, order, modelData) {
+        var dstAttributes = modelData.attributes;
+        for (var idxAttr = 0; idxAttr < sourceAttributes.length; idxAttr++) {
+            var attr = sourceAttributes[idxAttr];
+            var operatorConfigs = attr.operatorConfigs;
+            // id need modify, its id according its type&&key 
+            for (var jdx = 0; jdx < operatorConfigs.length; jdx++) {
+                this.resolveOperatorConfigId(operatorConfigs[jdx]);
+            }
+            dstAttributes.push({
+                id: null,
+                name: attr.name,
+                shortName: attr.shortName,
+                dataType: attr.dataType,
+                regExPattern: null,
+                sortOrder: order + idxAttr,
+                operatorConfigs: operatorConfigs,
+            });
+        }
+    },
+	// GetOperatorID
+    GetOperatorID: function(type){
+		var queryOperatorId = this.getOperatorIdForObligation(type);
+		var operatorResult =  this.sendGetRequest(queryOperatorId);
+		return operatorResult;
+	},
+	refactorOperatorData:function(operatorData){
+		var dic = new Array();
+		for(var index = 0;index <operatorData.length; index++){
+			var key = operatorData[index]['key'];
+			var id = operatorData[index]['id'];
+			dic[key] = id;
+		}
+		return dic;
+	},
+	GetOperatorData: function(){
+	    var numberOperatorResult = JSON.parse(this.GetOperatorID('NUMBER'));
+		var stringOperatorResult = JSON.parse(this.GetOperatorID('String'));
+		var multivalOperatorResult = JSON.parse(this.GetOperatorID('MULTIVAL'));
+		
+		this.numberOperatorData = this.refactorOperatorData(numberOperatorResult.data);
+		this.stringOperatorData = this.refactorOperatorData(stringOperatorResult.data);
+		this.multivalOperatorData = this.refactorOperatorData(multivalOperatorResult.data);
+    },
+	// GetOperatorID
+	/**
+     * Reset the `id` property of the `operatorConfig` based on its `dataType` and `key`.
+     * @param {OperatorConfig} operatorConfig the OperatorConfig to resolve.
+     */
+    resolveOperatorConfigId: function (operatorConfig) {
+        if (operatorConfig.dataType == 'NUMBER') {
+            if (operatorConfig.key == '=') {
+				operatorConfig.id = this.numberOperatorData['='];
+                //operatorConfig.id = 25;
+            } else if (operatorConfig.key == '!=') {
+				operatorConfig.id = this.numberOperatorData['!='];
+               // operatorConfig.id = 26;
+            } else if (operatorConfig.key == '<') {
+				 operatorConfig.id = this.numberOperatorData['<'];
+                //operatorConfig.id = 27;
+            } else if (operatorConfig.key == '<=') {
+				operatorConfig.id = this.numberOperatorData['<='];
+                //operatorConfig.id = 28;
+            } else if (operatorConfig.key == '>') {
+				operatorConfig.id = this.numberOperatorData['>'];
+                //operatorConfig.id = 29;
+            } else if (operatorConfig.key == '>=') {
+				operatorConfig.id = this.numberOperatorData['>='];
+                //operatorConfig.id = 30;
+            }
+        } else if (operatorConfig.dataType == 'STRING') {
+            if (operatorConfig.key == '=') {
+				operatorConfig.id = this.stringOperatorData['='];
+                //operatorConfig.id = 23;
+            } else if (operatorConfig.key == '!=') {
+				operatorConfig.id = this.stringOperatorData['!='];
+                //operatorConfig.id = 24;
+            }
+        } else if (operatorConfig.dataType == 'MULTIVAL') {
+            if (operatorConfig.key == 'includes') {
+				operatorConfig.id = this.multivalOperatorData['includes'];
+                //operatorConfig.id = 31;
+            } else if (operatorConfig.key == 'equals_unordered') {
+				operatorConfig.id = this.multivalOperatorData['equals_unordered'];
+                //operatorConfig.id = 32;
+            } else if (operatorConfig.key == '=') {
+				operatorConfig.id = this.multivalOperatorData['='];
+                //operatorConfig.id = 33;
+            } else if (operatorConfig.key == '!=') {
+				operatorConfig.id = this.multivalOperatorData['!='];
+                //operatorConfig.id = 34;
+            }
+        }
+    },
+
+    /**
+     * 
+     * @param {PolicyModel} modelData
+     * @param {ObligationItem[]} modelData.obligations Cannot be null.
+     * @param {ObligationItem[]} remoteObligations 
+     * @param {PolicyModel} localModel
+     */
+    ModifyObligations: function (modelData, remoteObligations, localModel) {
+        // process local obligations
+        var idx, jdx;
+        var isHaved = false;
+        var localListValues = '';
+        var localObligations = localModel.obligations;
+        for (idx = 0; idx < localObligations.length; idx++) {
+            var localObligation = localObligations[idx];
+            if (localObligation.shortName == 'record_filter') {
+                localListValues = localObligation.parameters[0].listValues;
+            }
+
+            for (jdx = 0; jdx < remoteObligations.length; jdx++) {
+                if (localObligation.shortName == remoteObligations[jdx].shortName) {
+                    isHaved = true;
+                }
+            }
+            if (!isHaved) {
+                this.AddObligations(modelData, localObligation, 1 + remoteObligations.length);
+            }
+        }
+        // process remote obligations
+        for (idx = 0; idx < remoteObligations.length; idx++) {
+            var remoteObligaiton = remoteObligations[idx];
+            var newParameters = [];
+            /** @type {ObligationItem} */
+            newObligation = {
+                id: null,
+                name: remoteObligaiton.name,
+                shortName: remoteObligaiton.shortName,
+                runAt: remoteObligaiton.runAt,
+                sortOrder: remoteObligaiton.sortOrder,
+                parameters: newParameters
+            };
+            var remoteParameters = remoteObligaiton.parameters;
+            for (jdx = 0; jdx < remoteParameters.length; jdx++) {
+                var remoteParam = remoteParameters[jdx];
+                /** @type {ParameterItem} */
+                var newParam = {
+                    id: null,
+                    name: remoteParam.name,
+                    type: remoteParam.type,
+                    defaultValue: remoteParam.defaultValue,
+                    value: '',
+                };
+                gs.debug('shortName:' + remoteParam.shortName);
+                if (remoteObligaiton.shortName == 'record_filter' && remoteParam.shortName.startsWith('field')) {
+                    newParam.listValues = localListValues;
+                } else {
+                    newParam.listValues = remoteParam.listValues;
+                }
+                newParam.hidden = remoteParam.hidden;
+                newParam.editable = remoteParam.editable;
+                newParam.mandatory = remoteParam.mandatory;
+                newParam.shortName = remoteParam.shortName;
+                newParam.sortOrder = remoteParam.sortOrder;
+                newParameters.push(newParam);
+            }
+            modelData.obligations.push(newObligation);
+        }
+    },
+
+    /**
+     * Adds a new obligations into `modelData.obligations` by the source `obligation`.
+     * @param {PolicyModel} modelData the model containing obligations to add
+     * @param {ObligationItem} obligation the source obligation to refer to
+     * @param {number} order
+     */
+    AddObligations: function (modelData, obligation, order) {
+        var newParameters = [];
+        var newObligation = {
+            id: null,
+            name: obligation.name,
+            type: obligation.type,
+            shortName: obligation.shortName,
+            runAt: obligation.runAt,
+            order: order,
+            parameters: newParameters
+        };
+        var srcParameters = obligation.parameters;
+        for (var idx = 0; idx < srcParameters.length; idx++) {
+            var srcParam = srcParameters[idx];
+            /** @type {ParameterItem} */
+            var parameters = {
+                id: null,
+                name: srcParam.name,
+                type: srcParam.type,
+                defaultValue: srcParam.defaultValue,
+                value: '',
+                listValues: srcParam.listValues,
+                hidden: srcParam.hidden,
+                editable: srcParam.editable,
+                mandatory: srcParam.mandatory,
+                shortName: srcParam.shortName,
+                sortOrder: idx
+            };
+            newParameters.push(parameters);
+        }
+        modelData.obligations.push(newObligation);
+    },
+};
+
+/**
+ * Iterates once for each element in an array, in order, and constructs a new array from the results using each `shortName` property.
+ * @param {{id: number, name: string, shortName: string}[]} anArray  the array to be processed in
+ */
+function mapShortName(anArray) {
+    return anArray.map(function (it) {
+        return it.shortName;
+    });
+}
+
+var NxlPolicy = function () {
+    this.name = '123';
+};
+var NxlAction = function () {};
+var NxlResource = function () {};
+var NxlSubject = function () {};
+var NxlComponent = function () {};
+var NxlCondition = function () {};
+var NxlObligation = function () {};
+
+var ContentType_X_WWW_From_Urlencoded = 'application/x-www-form-urlencoded';
+var ContentType_JSON_UTF_8 = 'application/json;charset=UTF-8';
+
+/**
+ * @class PolicyTag
+ * @constructor
+ * @param {number} id The unique identifier integer.
+ * @param {string} key
+ * @param {string} label
+ * @param {'COMPONENT_TAG'|'POLICY_MODEL_TAG'} type
+ * @param {'ACTIVE'} status Indicates whether this Tag is enabled
+ */
+function TagItem(id, key, label, type, status) {
+    this.id = id;
+    this.key = key;
+    this.label = label;
+    this.type = type;
+    this.status = status;
+}
+
+/**
+ * @class PolicyAction
+ * @constructor
+ * @param {string} id The unique identifier.
+ * @param {string} name
+ * @param {string} shortName
+ * @param {number} sortOrder
+ */
+function ActionItem(id, name, shortName, sortOrder) {
+    this.id = id;
+    this.name = name;
+    this.shortName = shortName;
+    this.sortOrder = sortOrder;
+}
+
+/**
+| dataType | key              | label           | id |
+|----------|------------------|-----------------|----|
+| MULTIVAL | =                | =               | 33 |
+| MULTIVAL | !=               | !=              | 34 |
+| MULTIVAL | equals_unordered | exactly matches | 32 |
+| MULTIVAL | includes         | includes        | 31 |
+| STRING   | !=               | is not          | 24 |
+| STRING   | =                | is              | 23 |
+| NUMBER   | <                | <               | 27 |
+| NUMBER   | <                | >               | 29 |
+| NUMBER   | >=               | >=              | 30 |
+| NUMBER   | !=               | !=              | 26 |
+| NUMBER   | =                | =               | 25 |
+| NUMBER   | <=               | <=              | 28 |
+ * @typedef OperatorConfig
+ * @type {Object}
+ * @property {number} id
+ * @property {string} key
+ * @property {string} label
+ * @property {'STRING'|'NUMBER'|'MULTIVAL'} dataType
+ */
+
+/**
+ * @typedef AttributeItem
+ * @type {Object}
+ * @property {string} id
+ * @property {string} name
+ * @property {string} shortName
+ * @property {string} dataType
+ * @property {OperatorConfig[]} operatorConfigs
+ * @property {string} regExPattern
+ * @property {number} sortOrder
+ */
+
+/**
+ * @typedef ParameterItem
+ * @type {Object}
+ * @property {string} id
+ * @property {string} name
+ * @property {string} shortName
+ * @property {string} type
+ * @property {string} defaultValue
+ * @property {string} value
+ * @property {string} listValues
+ * @property {boolean} hidden
+ * @property {boolean} editable
+ * @property {boolean} mandatory
+ * @property {number} sortOrder
+ */
+
+/**
+ * @typedef ObligationItem
+ * @type {Object}
+ * @property {string} id
+ * @property {string} name
+ * @property {string} shortName
+ * @property {string} runAt
+ * @property {ParameterItem[]} parameters
+ * @property {number} sortOrder
+ */
+
+/**
+ * @typedef PolicyModel
+ * @type {Object}
+ * @property {number} id The unique identifier integer.
+ * @property {string} name The display name of the item. Names cannot be longer than 128 characters, and cannot include the reserved characters
+ *  $, /, ?, \, &, or *. Names can include multibyte characters, such as those used in Asian languages.
+ * @property {string} shortName The internal identifier associated with the item. The system uses short names to reference items in the database.
+ *  Short names cannot contain spaces or special characters, and they cannot be changed after they are added. In addition, short names must be
+ *  unique in the system. Developers should keep a record of the short names because they are required for API calls. For example, to reference
+ *  attributes in a request, you would use this format: resource.pat_rec.age, where pat_rec is the short name for Patient Record, and age is the
+ *  short name for Age.
+ * @property {'SUBJECT'|'RESOURCE'} type
+ * @property {'ACTIVE'} status Indicates whether this Policy Model is enabled
+ * @property {string} description A description of the item. This field is useful for explaining how the item is used and for documenting changes
+ *  to the item. Descriptions can include multibyte characters, such as those used in Asian languages.
+ * @property {string[]} tags Labels that identify or classify objects. For example, you could apply a tag named Team1 to all documents related
+ *  to the Team1 project. You could then search for documents with the Team1 tag, or set access requirements for documents with the Team1 tag.
+ * @property {AttributeItem[]} attributes Data associated with the item. Attributes have names, data types, and operators.
+ * @property {ActionItem[]} actions The operation to be performed on the resource, such as opening or accessing, copying, printing, or sharing. Actions
+ *  are operations that can be performed on Resource types. Authorization requests are defined as requests to access resources and perform
+ *  actions. For example, "Read" patient records, "Approve" purchase orders, "Download" documents.
+ * @property {[]} obligations The set of operations that must be performed by the PEP (Policy Enforcement Point) in conjunction with an
+ *  authorization decision. Obligation can be associated with a "Allow" or "Deny" authorization decisions.
+ * @property {number} version
+ */
+
+/**
+ * The response object of the API List Policy Model `POST policyModel/search`
+ * @typedef {ConsoleResult<PolicyModel[]>} PolicyModelSearchResult
+ * @property {string} statusCode e.g. "1004" for Success Response, "5001" for Fail Response
+ * @property {string} message e.g. "Data loaded successfully", "No data found for given criteria"
+ * @property {PolicyModel[]} data Policy Model list
+ * @property {number} pageNo
+ * @property {number} pageSize
+ * @property {number} totalPages
+ * @property {number} totalNoOfRecords
+ * @example
+{
+    "statusCode": "1004",
+    "message": "Data loaded successfully",
+    "data": [
+        {
+            "id": 35,
+            "name": "User",
+            "shortName": "user",
+            "description": "An actor or subject whose attributes may be referenced in component",
+            "type": "SUBJECT",
+            "status": "ACTIVE",
+            "lastUpdatedDate": 1542795475667,
+            "createdDate": 0,
+            "ownerId": 0,
+            "ownerDisplayName": null,
+            "modifiedById": 0,
+            "modifiedBy": null,
+            "tags": [],
+            "attributes": [],
+            "actions": [],
+            "obligations": [],
+            "authorities": [
+                {
+                    "authority": "VIEW_POLICY_MODEL"
+                },
+                {
+                    "authority": "EDIT_POLICY_MODEL"
+                },
+                {
+                    "authority": "DELETE_POLICY_MODEL"
+                },
+                {
+                    "authority": "DEPLOY_POLICY_MODEL"
+                }
+            ],
+            "version": 100
+        },
+        {
+            "id": 22944,
+            "name": "Incident",
+            "shortName": "incident",
+            "description": "",
+            "type": "RESOURCE",
+            "status": "ACTIVE",
+            "lastUpdatedDate": 1541056125779,
+            "createdDate": 0,
+            "ownerId": 0,
+            "ownerDisplayName": null,
+            "modifiedById": 0,
+            "modifiedBy": null,
+            "tags": [],
+            "attributes": [],
+            "actions": [],
+            "obligations": [],
+            "authorities": [
+                {
+                    "authority": "VIEW_POLICY_MODEL"
+                },
+                {
+                    "authority": "EDIT_POLICY_MODEL"
+                },
+                {
+                    "authority": "DELETE_POLICY_MODEL"
+                },
+                {
+                    "authority": "DEPLOY_POLICY_MODEL"
+                }
+            ],
+            "version": 6
+        }
+    ],
+    "pageNo": 0,
+    "pageSize": 20,
+    "totalPages": 1,
+    "totalNoOfRecords": 17
+}
+ */
+
+/**
+ * The response object of the API Retrieve Policy Model `GET policyModel/mgmt/active/{id}`
+ * @typedef {ConsoleResult<PolicyModel>} PolicyModelResult
+ * @property {string} statusCode e.g. "1004" for Success Response, "5001" for Fail Response
+ * @property {string} message e.g. "Data loaded successfully", "No data found for given criteria"
+ * @property {PolicyModel} data The Policy Model
+ */
+
+/**
+ * The response object of the API List Policy Model
+ * @path POST policyModel/search
+ * @template T
+ * @typedef ConsoleResult
+ * @type {Object}
+ * @property {string} statusCode
+ * @property {string} message
+ * @property {T} data
+ * @example
+{
+    "statusCode": "6004",
+    "message": "Request has not been authenticated"
+}
+ */
+
+/**
+ * @typedef PolicyModelResource
+ * @type {Object}
+ * @property {Object[]} policyModels
+ * @property {number} policyModels[].id
+ * @property {string} policyModels[].name
+ * @property {string} policyModels[].shortName
+ * @property {string} policyModels[].description
+ * @property {'RESOURCE'|'SUBJECT'} policyModels[].type
+ * @property {'ACTIVE'} policyModels[].status
+ * @property {AttributeItem[]} policyModels[].attributes
+ * @property {ActionItem[]} policyModels[].actions
+ * @property {ObligationItem} policyModels[].obligations
+ * @property {Object[]} components
+ * @property {number} components[].id
+ * @property {string} components[].name
+ * @property {string} components[].description
+ * @property {'ACTION'} components[].type
+ * @property {'COMPONENT'} components[].category
+ * @property {{id:number}} components[].policyModel
+ * @property {string[]} components[].actions
+ * @property {string} components[].status
+ * @property {Object} policyTree
+ * @property {[]]} importedPolicyIds
+ * @property {boolean} overrideDuplicates
+ * @property {Object} componentToSubCompMap
+ * @see http://usejsdoc.org/tags-param.html#parameters-with-properties Documenting properties of values in an array
+ */]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-09-30 02:53:24</sys_created_on>
+        <sys_id>d23161aadb302300c352e1bb4b9619e7</sys_id>
+        <sys_mod_count>19</sys_mod_count>
+        <sys_name>CommunicateWithWebConsole</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy>read</sys_policy>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_script_include_d23161aadb302300c352e1bb4b9619e7</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-04-19 02:58:58</sys_updated_on>
+    </sys_script_include>
+</record_update>

@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ui_page">
+    <sys_ui_page action="INSERT_OR_UPDATE">
+        <category>general</category>
+        <client_script><![CDATA[// https://community.servicenow.com/community?id=community_question&sys_id=f6af7e2ddb58dbc01dcaf3231f961941
+// https://community.servicenow.com/community?id=community_question&sys_id=b73c4b65db9cdbc01dcaf3231f961901
+// https://stackoverflow.com/questions/41447692/servicenow-ui-page-glideajax
+// https://docs.servicenow.com/bundle/geneva-servicenow-platform/page/script/server_scripting/reference/r_ExamplesOfAsynchronousGlideAjax.html
+
+window.onload = function () {
+	var util = nxl.util;
+	var $ = util.$;
+	var sdk = nxl.sdk;
+	displayLastResultDate();
+	var pop = {
+		el: $('#overlay'),
+		show: function () {
+			this.el.classList.remove('hide');
+		},
+		hide: function () {
+			this.el.classList.add('hide');
+		}
+	};
+	$('#topbarSaveBtn').on('click',function(event){
+		pop.show();
+		jslog('==== sync started');
+		var ga = new GlideAjax('PDPApi');
+		ga.addParam('sysparm_name', 'syncPolicies');
+		//ga.addParam('sysparm_user_name', "Bob");
+		ga.getXML(syncPoliciesParse);
+		jslog('=== Finished');
+	});
+	function displayNowDate(){
+		var localeString = new Date().toLocaleString();
+		var timeText = 'Activate Policy failed at time of '+localeString+',please click Activate Policy try again.';
+		return timeText;
+	}
+	function querySucceedDate(){
+		var rec = new GlideRecord('sys_properties');
+		rec.addQuery('name','=', 'x_230565_emsn.SyncPolicySuccess');
+		rec.query();
+		if(rec.next()){
+			if(rec.value){
+				return rec.value;
+			}
+		}
+	}
+	function queryFailedDate(){
+		var rec = new GlideRecord('sys_properties');
+		rec.addQuery('name','=', 'x_230565_emsn.SyncPolicyFailed');
+		rec.query();
+		if(rec.next()){
+			if(rec.value){
+				return rec.value;
+			}
+		}
+	}
+	function displaySucceedDate(succeedTime){
+		var utc = new Date(Number(succeedTime));
+		var localeString = utc.toLocaleString();
+		var timeText = 'Latest policy sync succeeded time:'+localeString;
+		$('#succeedTime').innerText =timeText;
+	}
+	function displayFailedDate(failedTime){
+		var utc = new Date(Number(failedTime));
+		var localeString = utc.toLocaleString();
+		var timeText = 'Activate Policy failed at time of '+localeString+',please click Activate Policy try again.';
+		$('#failedTime').innerText =timeText;
+	}
+	function displayLastResultDate(){
+		var succeedTime = querySucceedDate();
+		var failedTime = queryFailedDate();
+		if(succeedTime && failedTime){
+			// last time is failed
+			if(Number(failedTime) > Number(succeedTime)){
+				displaySucceedDate(succeedTime);
+				displayFailedDate(failedTime);
+			}
+			else{
+				//last time is success
+				displaySucceedDate(succeedTime);
+			}
+		}
+		else{
+			//last time is success
+			if(succeedTime){
+				displaySucceedDate(succeedTime);
+			}else if(failedTime){
+				displayFailedDate(failedTime);
+			}
+		}
+	}
+	function syncPoliciesParse(response) {
+		try{
+			var xmlDoc = response.responseXML;
+			var xmlNode = xmlDoc && xmlDoc.documentElement;
+			var result = util.objectify(xmlNode);
+			if(result && result.xml && !result.xml.error && result.xml.answer){
+				if(result.xml.answer.status == '0'){
+					var time = result.xml.answer.message;
+					if(time){
+						displaySucceedDate(time);
+						$('#failedTime').innerText ='';
+					}
+				}else{
+					var dataList = result.xml.answer;
+					if(Array.isArray(dataList)){
+						dataList.forEach(function (data) {
+							if(data.status == '10000'&&data.message){
+								var time = data.message;
+								displayFailedDate(time);
+							}else if(data.status == '10001'&&data.message){
+								var time = data.message;
+								displaySucceedDate(time);
+							}else{
+								$('#failedTime').innerText = displayNowDate();
+							}
+						});
+					}
+				}
+			}
+			else{
+				var failedTime = queryFailedDate();
+				if(failedTime){
+					displayFailedDate(failedTime);
+				}		
+			}
+		}
+		catch(e){
+		}
+		pop.hide();
+	}
+}]]></client_script>
+        <description/>
+        <direct>false</direct>
+        <endpoint>x_230565_emsn_activate_policy.do</endpoint>
+        <html><![CDATA[<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly trim="false" xmlns:j="jelly:core" xmlns:g="glide" xmlns:j2="null" xmlns:g2="null">
+	<!-- <!DOCTYPE html> Error at line (3) A DOCTYPE is not allowed in content. -->
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+	  <head>
+    <title>ActivatePolicy</title>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+    <meta name="apple-mobile-web-app-capable" content="yes"/>
+		  <g:evaluate var="jvar_grCSS" object="true">
+        // Latest compiled and minified CSS <style type="text/css"></style>
+        var grCSS = new GlideRecord('content_css');
+        grCSS.get('name', 'SecuredEntities.css');
+		grCSS;
+    </g:evaluate>
+    <link href="${jvar_grCSS.getValue('sys_id')}.cssdbx?revision=${jvar_grCSS.getValue('sys_updated_on')}" rel="stylesheet" type="text/css" />
+  </head>
+<head>
+</head>
+	<body>    
+    <div class="header">
+        <div class="topbar" style="height: 35px;margin-left: -50px;">
+            <div id="topbarHomeBtn" class="col btn co-title-wrap">
+                <img class="co-title" src="nxl_title_sm.png"/><h6 class="co-title-desc font-sm font-bold">Entitlement Management</h6>
+            </div>
+            <div id="topbarSaveBtn" class="col btn topbar-btn-wrap"><img style="margin-top: -3px;" src="nxl_activatePolicy.png"></img><span class="topbar-btn-text font-md">ActivatePolicy</span></div>
+            <i style="display: none !important;" class="box sep-v"></i>
+            <div style="display: none !important;" id="topbarExportAndSaveBtn" class="col btn topbar-btn-wrap">
+                <i class="box export-icon"></i><span class="topbar-btn-text font-md">Export &amp; Save Selected Attributes</span>
+            </div>
+        </div>
+    </div>
+		 <div id="overlay" class="overlay hide">
+        <div class="modal" style="height: 190px;width:530px;">
+            <!--<div class="modal-header gray-down">
+                <h4 class="modal-title font-bold"></h4><button class="btn modal-close hide">X</button>
+            </div>  -->       
+			<div id="displayResultBody" class="modal-body" style="height: 50px;padding-bottom: 10px;">
+				<p id="secureEntitiesMsg" class="modal-msg" style="font-size: 21px;"> Syncing policies from server,please wait for a while.</p>
+			</div>
+            <div class="modal-footer modal-toolbar" style="height: 75px;">
+				<img src="nxl_loading.gif"></img>
+                <!--<button id="export-confirm-btn" class="btn btn-default btn-sm font-md footer-btn-margin">OK</button>-->
+            </div>
+        </div>
+    </div>
+    <div class="content">
+        <div>
+            <div class="content-header"><img class="box content-header-avatar" src="nxl_activatePolicyTitle.png"/>
+                <div class="box content-title-wrap">
+                    <h2 class="content-title font-bold">ActivatePolicy</h2>
+                    <p class="content-title-desc font-md">Activate Policies from NextLabs Policy Server to Entitlement Management For ServiceNow App.</p>
+                    <hr class="sep-title-h"/>
+                    <p class="content-title-info font-md">Users can only access selected entities and records that they are authorized to use, based on the policies defined in NextLabs CloudAz.</p>
+                </div>
+            </div>
+		</div>
+		</div>
+		 <g:evaluate>
+                var UIScriptNames = ['promise-polyfill', 'nxl_util', 'nxl-sn-sdk'];
+                var ui_script_timestamps = SEUtil.getUIScriptTimestamps(UIScriptNames);
+                var idxUIScript = 0;
+        </g:evaluate>
+        <j:forEach items="${UIScriptNames}" var="jvar_ui_script_name">
+            <g:evaluate var="jvar_ui_script_timestamp" jelly="true">
+                var ui_script_timestamp = ui_script_timestamps[idxUIScript++];
+                SEUtil.debug('UIPage.ActivatePolicy', '{0}: {1} was updated on {2}', idxUIScript, jelly.jvar_ui_script_name, ui_script_timestamp);
+                ui_script_timestamp;
+            </g:evaluate>
+            <g:requires name="x_230565_emsn.${jvar_ui_script_name}.jsdbx" params="cache=${ui_script_timestamp}" />
+        </j:forEach>		
+		<div id="succeedTime" style="padding-left: 122px;font-size: 20px;"></div>
+		<div id="failedTime" style="padding-left: 122px;font-size: 20px;"></div>
+	</body>
+	</html>	
+</j:jelly>]]></html>
+        <name>activate_policy</name>
+        <processing_script/>
+        <sys_class_name>sys_ui_page</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-10-17 10:30:47</sys_created_on>
+        <sys_id>b4daee0cdb59630082f7ab7dca961942</sys_id>
+        <sys_mod_count>121</sys_mod_count>
+        <sys_name>activate_policy</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ui_page_b4daee0cdb59630082f7ab7dca961942</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-03-29 05:13:33</sys_updated_on>
+    </sys_ui_page>
+</record_update>

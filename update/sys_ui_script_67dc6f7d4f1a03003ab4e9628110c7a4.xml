@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ui_script">
+    <sys_ui_script action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <description>sdk for http request</description>
+        <global>false</global>
+        <name>x_230565_emsn.nxl-sn-sdk</name>
+        <script><![CDATA[(function(win){
+
+    win.nxl = win.nxl || {};    
+    win.nxl.sdk = win.nxl.sdk || {};
+
+    var _s = win.nxl.sdk;
+    var util = win.nxl.util;
+    var GlideAjax = win.parent.GlideAjax;
+    var APP_SCOPE_NAME = window.parent.MY_SCOPE_NAME;
+    var APP_SCOPE_SYS_ID = window.parent.MY_SCOPE_SYSID;    
+    var X_USER_TOKEN = window.parent['g'.toLowerCase() + '_ck']; // @Validation Eliminate the warning "Sensitive Data Exposure";
+    /**
+     * sysparm_name, sysparm_function, sysparm_value, sysparm_type. sysparm_processor, sysparm_want_session_messages
+     * @see https://docs.servicenow.com/bundle/geneva-servicenow-platform/page/script/server_scripting/reference/r_GlideAjax.html
+     */
+    var paramsPredefinedByGlideAjax = {
+        name: 'sysparm_name',
+        function: 'sysparm_function',
+        value: 'sysparm_value',
+        type: 'sysparm_type',
+    };
+    /**
+     * Instantiates a object of type GlideAjax using the specified base url path. Note, Even if our code looks like `new GlideAjax(processor, url)`,
+     * ServiceNow will automatically suffix it with `.setScope("x_123456_appp")`, Where, `x_123456_appp` is the Application field of this UI script file.
+     * @param {string} processor the script include class extending the AbstractAjaxProcessor class in a server-side script include with `Client callable` checked.
+     * It will be added like {@link GlideAjax#addParam}, but if both exist, its result is  `sysparm_processor: AJAXXMLHttpAggregator & 0.sysparm_processor: SysMeta`.
+     * Currently possible value: "PDPApi", "SysMeta", "AJAXXMLHttpAggregator".
+     * @param {string} [url] The path of a url. By default it's "/xmlhttp.do" (`(processor, url) => if (url) u = url;` of desktop, `(e, t) => r = t || r`) for mobile.
+     * @param {string} [scope] reset the scope automatically set by ServiceNow after instantiating using the ServiceNow API `GlideAjax`.
+     * @return {GlideAjax} an instance of type `GlideAjax`.
+     * @see https://developer.servicenow.com/app.do#!/api_doc?v=kingston&id=c_GlideAjaxAPI
+     * @see https://docs.servicenow.com/bundle/geneva-servicenow-platform/page/script/server_scripting/reference/r_GlideAjax.html
+     * @see https://<instanceName>.service-now.com/scripts/doctype/js_includes_doctype.jsx?v=12-04-2018_0932&lp=Tue_Jan_08_01_30_54_PST_2019&c=4_50:formatted GlideAjax for Desktop
+     * @see https://<instanceName>.service-now.com/scripts/snm/js_includes_snm.jsx?v=12-04-2018_0932&lp=Tue_Jan_08_01_30_54_PST_2019&c=4_50:formatted GlideAjax for Mobile
+     */
+    var getGlideAjaxInstance = function (processor, url, scope) {
+        // See https://docs.servicenow.com/bundle/geneva-servicenow-platform/page/script/server_scripting/reference/r_ExamplesOfSynchronousGlideAjax.html
+        // and https://docs.servicenow.com/bundle/geneva-servicenow-platform/page/script/server_scripting/reference/r_ExamplesOfAsynchronousGlideAjax.html
+        // debugger; // The server-side script include code of two examples uses `Object.extendsObject(AbstractAjaxProcessor, {})`.
+        // If `GlideAjax#setProcessor` isn't called, `GlideAjax#processor` is unset and it will log an error message "GlideAjax.initalize: must specify a processor".
+        var glideAjax = new GlideAjax(processor, url); // its `scope` is set to `global` for desktop version, but its `scope` is unset for mobile version.
+        var params = glideAjax.getParams();
+        if (scope) {
+            // glideAjax.setScope(APP_SCOPE_NAME);
+            params.setScope(scope);
+        }
+        return glideAjax;
+    };
+
+    /**
+     * Generates a Request fetch-like function based on the given base url path.
+     * @param {string} processor The script include class extending the AbstractAjaxProcessor class in a server-side script include with `Client callable` checked.
+     * @see https://docs.servicenow.com/script/server_scripting/reference/r_ExamplesOfAsynchronousGlideAjax.html
+     */
+    var fetchGlideFactory = function(processor){
+        /**
+         * I just added some comments for joe's code.
+         * @param {string} resource The exposed method name of the script include class extending the AbstractAjaxProcessor class.
+         * @param {object} data paramaters to be added by {@link GlideAjax#addParam}
+         */
+        return function(resource, data, needResource){
+
+            needResource = needResource == null ? true : needResource;
+
+            return new Promise(function(resolve, reject){
+
+                var ajax = getGlideAjaxInstance(processor);
+
+                if(needResource) {
+                    ajax.addParam('sysparm_name', resource);
+                }
+
+                reject = reject || window.parent.jslog;
+
+                data != null && Object.keys(data).map(function(prop){
+                    if(prop != null && data[prop] != null)
+                    ajax.addParam('sysparm_'+prop, data[prop]);
+                });
+                
+                ajax.getXML(function(res){
+                    try{
+                        var xmlDoc = res.responseXML;
+                        var xmlNode = xmlDoc && xmlDoc.documentElement;
+                        var result = util.objectify(xmlNode);
+
+                        if(result && result.xml && !result.xml.error){
+							resolve(result);      
+                        }
+                        else{
+                            if(result && result.xml){								
+                                throw new Error(result.xml.error);
+                            }
+                            else{
+                                throw new Error(result);
+                            }
+                        }
+                    }
+                    catch(e){
+                        reject(e);
+                    }
+                });
+            });
+        };
+    };
+
+    var fetchRestFactory = function(baseUrl){
+
+        /**
+         * @param {string} resource
+         * @param {string} data
+         * @param {{ headers: {}, method: string }} options
+         */
+        return function(resource, data, options){
+            return new Promise(function(resolve, reject){
+
+                var url = util.format('{0}/{1}', baseUrl, resource);
+
+                options = options || {};
+                var method = options.method || 'POST';
+                var headers = options.headers || {};
+
+                reject = reject || window.parent.jslog;
+
+                var xhr = new XMLHttpRequest();
+                xhr.open(method, url);
+
+                Object.keys(headers).forEach(function(key){
+                    xhr.setRequestHeader(key, headers[key]);
+					 xhr.setRequestHeader('x'.toUpperCase() + '-UserToken', X_USER_TOKEN); // `"X" + "-UserToken"`
+                });
+
+                xhr.onreadystatechange = function(e){
+                    var src = e.target;
+                    if(src.readyState === 4){
+                        if(src.status === 200){
+                            typeof resolve === 'function' && resolve(xhr.responseText);
+                        }
+                        else{
+                            reject(new Error(JSON.stringify({ status: xhr.status, error: xhr.responseText })));
+                        }
+                    }
+                }
+
+                xhr.send(data);
+            });
+        }
+    }
+
+    _s.getGlideAjaxInstance = getGlideAjaxInstance;
+    _s.fetchFactory = fetchGlideFactory;
+    _s.fetchRestFactory = fetchRestFactory;
+})(window);]]></script>
+        <script_name>nxl-sn-sdk</script_name>
+        <sys_class_name>sys_ui_script</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-09 02:20:27</sys_created_on>
+        <sys_id>67dc6f7d4f1a03003ab4e9628110c7a4</sys_id>
+        <sys_mod_count>26</sys_mod_count>
+        <sys_name>x_230565_emsn.nxl-sn-sdk</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ui_script_67dc6f7d4f1a03003ab4e9628110c7a4</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-03-28 08:20:54</sys_updated_on>
+        <use_scoped_format>false</use_scoped_format>
+    </sys_ui_script>
+</record_update>

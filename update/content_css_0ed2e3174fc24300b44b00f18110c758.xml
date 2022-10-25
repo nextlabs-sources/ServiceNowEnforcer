@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="content_css">
+    <content_css action="INSERT_OR_UPDATE">
+        <name>GeneralSettings</name>
+        <style>&lt;html&gt;&#13;
+&lt;head&gt;&#13;
+    &lt;!-- &lt;title&gt;General Settings&lt;/title&gt; --&gt;&#13;
+	&lt;!--common.css--&gt;&lt;link href="/07efa17d4f420300b44b00f18110c7c8.cssdbx?" rel="stylesheet" type="text/css" /&gt;&#13;
+	&lt;!--topbar.css--&gt;&lt;link href="/4e0302b54f820300b44b00f18110c734.cssdbx?" rel="stylesheet" type="text/css" /&gt;&#13;
+	&lt;!--sidebar.css--&gt;&lt;link href="/ec5346fd4f420300b44b00f18110c707.cssdbx?" rel="stylesheet" type="text/css" /&gt;&#13;
+	&lt;!--general-settings.css--&gt;&lt;link href="/ac734a754f820300b44b00f18110c72a.cssdbx?" rel="stylesheet" type="text/css" /&gt;&#13;
+&lt;/head&gt;&#13;
+&lt;body&gt;&#13;
+	&lt;div class="header"&gt;&#13;
+        &lt;div class="topbar"&gt;&#13;
+            &lt;div id="topbarHomeBtn" class="col btn co-title-wrap"&gt;&#13;
+                &lt;img class="co-title" src="/nxl_title_sm.png"/&gt;&#13;
+                &lt;h6 class="co-title-desc font-sm font-bold"&gt;Entitlement Management&lt;/h6&gt;&#13;
+            &lt;/div&gt;&#13;
+            &lt;div id="topbarSaveBtn" class="col btn topbar-btn-wrap"&gt;&#13;
+                &lt;i class="box save-icon"&gt;&lt;/i&gt;&#13;
+                &lt;span class="topbar-btn-text font-md"&gt;Save Settings&lt;/span&gt;&#13;
+            &lt;/div&gt;&#13;
+            &lt;i class="box sep-v"&gt;&lt;/i&gt;&#13;
+            &lt;div id="topbarDiscardBtn" class="col btn topbar-btn-wrap"&gt;&#13;
+                &lt;i class="box discard-icon"&gt;&lt;/i&gt;&#13;
+                &lt;span class="topbar-btn-text font-md"&gt;Discard Changes&lt;/span&gt;&#13;
+            &lt;/div&gt;&#13;
+        &lt;/div&gt;&#13;
+    &lt;/div&gt;&#13;
+&lt;div class="content"&gt;&#13;
+	&lt;div class="content-header"&gt;&#13;
+		&lt;img class="box content-header-avatar" src="/nxl_general_settings.png"/&gt;&#13;
+		&lt;div class="box content-title-wrap"&gt;&#13;
+			&lt;h2 class="content-title font-bold"&gt;General Settings&lt;/h2&gt;&#13;
+			&lt;p class="content-title-desc font-md"&gt;Policy controller and other Entitlement Management settings&lt;/p&gt;&#13;
+		&lt;/div&gt;&#13;
+		&lt;hr class="sep-title-h" /&gt;&#13;
+	&lt;/div&gt;&#13;
+	&lt;div class="content-body"&gt;&#13;
+		&lt;div class="section-content"&gt;&#13;
+			&lt;form&gt;&#13;
+				&lt;div class="form-control-group"&gt;&#13;
+					&lt;label for="pcHost" class="block form-label font-md font-bold"&gt;Policy Controller (PDP) Host&lt;/label&gt;&#13;
+					&lt;input id="pcHost" class="form-control form-input" type="text" placeholder="&amp;lt;Example: nxldemo-jpc.cloudaz.com&amp;gt;" /&gt;&#13;
+				&lt;/div&gt;&#13;
+				&lt;div class="form-control-group"&gt;&#13;
+					&lt;label for="pcPort" class="block form-label font-md font-bold"&gt;Policy Controller Port&lt;/label&gt;&#13;
+					&lt;input id="pcPort" class="form-control form-input https-input" type="text" placeholder="&amp;lt;Example: 443&amp;gt;" /&gt;&#13;
+					&lt;div class="box https-wrap"&gt;&#13;
+						&lt;input id="pcHttps" type="checkbox" /&gt;&#13;
+						&lt;label for="pcHttps"&gt;HTTPS&lt;/label&gt;&#13;
+					&lt;/div&gt;&#13;
+				&lt;/div&gt;&#13;
+				&lt;div class="form-control-group"&gt;&#13;
+					&lt;label for="oauthHost" class="block form-label font-md font-bold"&gt;OAuth Server Host&lt;/label&gt;&#13;
+					&lt;input id="oauthHost" class="form-control form-input" type="text" placeholder="&amp;lt;Example: nxldemo-cc.cloudaz.com&amp;gt;" /&gt;&#13;
+				&lt;/div&gt;&#13;
+				&lt;div class="form-control-group"&gt;&#13;
+					&lt;label for="oauthPort" class="block form-label font-md font-bold"&gt;OAuth Port&lt;/label&gt;&#13;
+					&lt;input id="oauthPort" class="form-control form-input" type="text" placeholder="&amp;lt;Example: 443&amp;gt;" /&gt;&#13;
+				&lt;/div&gt;&#13;
+				&lt;div class="form-control-group"&gt;&#13;
+					&lt;label for="clientId" class="block form-label font-md font-bold"&gt;Client ID&lt;/label&gt;&#13;
+					&lt;input id="clientId" class="form-control form-input" type="text" placeholder="&amp;lt;Example: apiclient&amp;gt;" /&gt;&#13;
+				&lt;/div&gt;&#13;
+				&lt;div class="form-control-group"&gt;&#13;
+					&lt;label for="clientKey" class="block form-label font-md font-bold"&gt;Client Secret Key&lt;/label&gt;&#13;
+					&lt;input id="clientKey" class="form-control form-input" type="text" placeholder="&amp;lt;Example: 123dynamics!&amp;gt;" /&gt;&#13;
+				&lt;/div&gt;&#13;
+				&lt;div class="form-control-group"&gt;&#13;
+					&lt;input id="testConnectionBtn" class="form-submit" type="submit" value="test connection" /&gt;&#13;
+					&lt;label id="testConnnectionError" class="block form-control form-label font-md font-red hide"&gt;X Connection could not be established.&lt;/label&gt;&#13;
+					&lt;label id="testConnnectionMsg" class="block form-control form-label font-md font-green"&gt;&lt;/label&gt;&#13;
+				&lt;/div&gt;&#13;
+			&lt;/form&gt;&#13;
+		&lt;/div&gt;&#13;
+    &lt;/div&gt;&#13;
+	&lt;!-- https://v4-alpha.getbootstrap.com/components/forms/#using-the-grid --&gt;&#13;
+	&lt;g:ui_form&gt;&#13;
+        &lt;div class="form-group is-required row"&gt;&#13;
+          &lt;label for="pc_host" class="control-label col-sm-4 text-right"&gt;&#13;
+            &lt;span class="required-marker"&gt;&lt;/span&gt;&#13;
+			  Host:&#13;
+          &lt;/label&gt;&#13;
+          &lt;span class="col-sm-8"&gt;&#13;
+			&lt;!-- https://stackoverflow.com/questions/8724954/what-is-the-maximum-number-of-characters-for-a-host-name-in-unix --&gt;&#13;
+			&lt;!-- https://stackoverflow.com/questions/32290167/what-is-the-maximum-length-of-a-dns-name --&gt;&#13;
+            &lt;input type="input" id="pc_host" name="pc_host" class="form-control" maxlength="253" placeholder="Input host name or ip" value="${gs.getProperty('x_230565_emsn.PCHost')}" required="required" autocomplete="off" aria-required="true"/&gt;&#13;
+            &lt;span id="pc_host_validation" class="help-block"&gt;&lt;/span&gt;&#13;
+          &lt;/span&gt;&#13;
+        &lt;/div&gt;        &#13;
+		&lt;div class="form-group is-required row"&gt;&#13;
+          &lt;label for="pc_port" class="control-label col-sm-4 text-right"&gt;&#13;
+            &lt;span class="required-marker"&gt;&lt;/span&gt;&#13;
+			  Port:&#13;
+          &lt;/label&gt;&#13;
+          &lt;span class="col-sm-8"&gt;&#13;
+            &lt;input type="input" id="pc_port" name="pc_port" class="form-control" maxlength="6" placeholder="Input port number"  value="$[gs.getProperty('x_230565_emsn.PCPort')]" required="required" autocomplete="off" aria-required="true"/&gt;&#13;
+            &lt;span id="pc_port_validation" class="help-block"&gt;&lt;/span&gt;&#13;
+          &lt;/span&gt;&#13;
+        &lt;/div&gt;&#13;
+		&lt;div class="form-group is-required row"&gt;&#13;
+          &lt;label for="pc_client_id" class="control-label col-sm-4 text-right"&gt;&#13;
+            &lt;span class="required-marker"&gt;&lt;/span&gt;&#13;
+			  Client ID:&#13;
+          &lt;/label&gt;&#13;
+          &lt;span class="col-sm-8"&gt;&#13;
+            &lt;input type="input" id="pc_client_id" name="pc_client_id" class="form-control" placeholder="" value="" required="required" autocomplete="off" aria-required="true" /&gt;&#13;
+            &lt;span id="pc_client_id_validation" class="help-block"&gt;&lt;/span&gt;&#13;
+          &lt;/span&gt;&#13;
+        &lt;/div&gt;&#13;
+		&lt;div class="form-group is-required row"&gt;&#13;
+          &lt;label for="pc_client_secret_key" class="control-label col-sm-4 text-right"&gt;&#13;
+            &lt;span class="required-marker"&gt;&lt;/span&gt;&#13;
+			  Client Secret Key:&#13;
+          &lt;/label&gt;&#13;
+          &lt;span class="col-sm-8"&gt;&#13;
+            &lt;input type="input" id="pc_client_secret_key" name="pc_client_secret_key" class="form-control" placeholder="" value="" required="required" autocomplete="off" aria-required="true" /&gt;&#13;
+            &lt;span id="pc_client_secret_key_validation" class="help-block"&gt;&lt;/span&gt;&#13;
+          &lt;/span&gt;&#13;
+        &lt;/div&gt;&#13;
+		&#13;
+		&lt;div class="form-group row"&gt;&#13;
+			&lt;div class="col-sm-4"&gt;&lt;/div&gt;&#13;
+			&lt;div class="col-sm-8"&gt;&#13;
+				&lt;div class="form-check"&gt;&#13;
+					&lt;label class="form-check-label checkbox-inline"&gt;&#13;
+						&lt;j:choose&gt;&#13;
+						   &lt;j:when test="${gs.getProperty('x_230565_emsn.PCHttps')}"&gt;&lt;input type="checkbox" class="form-check-input" id="isHttps" checked="checked"/&gt;&lt;/j:when&gt;&#13;
+						   &lt;j:otherwise&gt;&lt;input type="checkbox" class="form-check-input" id="isHttps"/&gt;&lt;/j:otherwise&gt;&#13;
+						&lt;/j:choose&gt;&#13;
+					Connect using HTTPS&lt;/label&gt;&#13;
+					&lt;label class="form-check-label checkbox-inline"&gt;&lt;input type="checkbox" class="form-check-input" id="useCloudAz"/&gt;Using CloudAz&lt;/label&gt;&#13;
+				&lt;/div&gt;&#13;
+			&lt;/div&gt;&#13;
+		&lt;/div&gt;&#13;
+	&lt;/g:ui_form&gt;&#13;
+	&#13;
+	&lt;div class="form-group row"&gt;&#13;
+		&lt;div class="col-sm-4"&gt;&lt;/div&gt;&#13;
+		&lt;div class="col-sm-2"&gt;&#13;
+			&lt;button class="btn btn-default" href="#" style="width: 100%;" id="test_connection"&gt;Test Connection&lt;/button&gt;&#13;
+		&lt;/div&gt;&#13;
+		&lt;div class="col-sm-2"&gt;&#13;
+			&lt;button class="btn btn-default" href="#" style="width: 100%;" id="submit"&gt;OK&lt;/button&gt;&#13;
+		&lt;/div&gt;&#13;
+		&lt;div class="col-sm-2"&gt;&#13;
+			&lt;button class="btn btn-default" href="#" style="width: 100%;"&gt;Cannel&lt;/button&gt;&#13;
+		&lt;/div&gt;&#13;
+	&lt;/div&gt;&#13;
+&lt;/div&gt;&#13;
+&lt;/body&gt;&#13;
+&lt;/html&gt;</style>
+        <sys_class_name>content_css</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-01 07:12:08</sys_created_on>
+        <sys_id>0ed2e3174fc24300b44b00f18110c758</sys_id>
+        <sys_mod_count>1</sys_mod_count>
+        <sys_name>GeneralSettings</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>content_css_0ed2e3174fc24300b44b00f18110c758</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2017-11-01 07:14:55</sys_updated_on>
+        <type>local</type>
+        <url/>
+    </content_css>
+</record_update>

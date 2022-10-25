@@ -1,0 +1,393 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>package_private</access>
+        <active>true</active>
+        <api_name>x_230565_emsn.PDPApi</api_name>
+        <client_callable>true</client_callable>
+        <description>PDPApi</description>
+        <name>PDPApi</name>
+        <script><![CDATA[var JPC_PATH = '/dpc/authorization/pdp';
+var CC_PATH = '/cas/token';
+var ERROR_STATUS_CODE = 10000;
+
+var PDPApi = Class.create();
+PDPApi.APP_SCOPE_NAME = gs.getCurrentScopeName(); // e.g. x_123456_app
+
+PDPApi.prototype = Object.extendsObject(global.AbstractAjaxProcessor, {
+	
+	testConnection: function () {
+		// SEUtil.debug('PDPApi.testConnection', 'ENTRY');
+		var params = this._getGeneralSettingParams(), url;
+		// SEUtil.debug('PDPApi.testConnection', 'params: {0}', new global.JSON().encode(params));
+
+		if (params.pcHost && !isNaN(params.pcPort)) {
+
+			url = SEUtil.buildHttpUrl(params.pcHost, params.pcPort, params.pcHttps) + JPC_PATH;
+			SEUtil.debug('PDPApi.testConnection', 'PC url: {0}', url);
+			this._testConnection(url).setAttribute('url', url);
+
+		} else {
+			this._newResponse(ERROR_STATUS_CODE, 'invalid pc host: ' + params.pcHost + ' or invalid pc port: ' + params.pcPort)
+			.setAttribute('url', url);
+		}
+
+		if (params.oauthHost && !isNaN(params.oauthPort)) {
+
+			url = SEUtil.buildHttpUrl(params.oauthHost, params.oauthPort, params.oauthHttps) + CC_PATH;
+			SEUtil.debug('PDPApi.testConnection', 'OAuth url: {0}', url);
+
+			if (params.clientId && params.clientKey) {
+				
+				var body = 'grant_type=client_credentials&client_id=' + encodeURIComponent(params.clientId) + 
+					   '&client_secret=' + encodeURIComponent(params.clientKey); //&expires_in=31536000
+
+				this._testConnection(url, body).setAttribute('url', url);					
+
+			} else {
+				this._newResponse(ERROR_STATUS_CODE, 'invalid client id or key').setAttribute('url', url);
+			}
+
+		} else {
+			this._newResponse(ERROR_STATUS_CODE, 'invalid oauth host: ' + params.oauthHost + ' or invalid oauth port: ' + params.oauthPort);
+		}
+	},
+
+	saveSetting: function () {
+		// SEUtil.debug('PDPApi.saveSetting', 'ENTRY, callerScopeName={0}, currentScopeName={1}', gs.getCallerScopeName(), gs.getCurrentScopeName());
+		var params = this._getGeneralSettingParams();
+		try {
+			SEUtil.saveProperty('Host', params.host);
+			SEUtil.saveProperty('PCHost', params.pcHost);
+			// SEUtil.saveProperty('PCPort', params.pcPort);
+			// SEUtil.saveProperty('PCHttps', params.pcHttps);
+			SEUtil.saveProperty('OAuthHost', params.oauthHost);
+			// SEUtil.saveProperty('OAuthPort', params.oauthPort);
+			// SEUtil.saveProperty('OAuthHttps', params.oauthHttps);
+			SEUtil.saveProperty('UserName', params.username);
+			SEUtil.saveProperty('Password', params.password);
+			SEUtil.saveProperty('ClientId', params.clientId);
+			SEUtil.saveProperty('ClientKey', params.clientKey);
+
+			// // Default behavior in case of system or configuration issues
+			// SEUtil.saveProperty('PolicyDecision', this.getParameter('sysparm_policydecision'));
+			// // Access denied due to system error. Try again and contact the system administrator if the problem persists.
+			// SEUtil.saveProperty('PolicyMsg', this.getParameter('sysparm_policymsg'));
+			// // Default message if the user is not authorized or no applicable policies
+			// SEUtil.saveProperty('PolicyDefaultMsg', this.getParameter('sysparm_policydefaultmsg'));
+
+			this._newResponse(0, 'OK');
+
+		} catch (e) { // MethodNotAllowedException
+			gs.addErrorMessage('Failed: ' + e);
+			this._newResponse(ERROR_STATUS_CODE, e.message);
+		}
+	},
+
+	getSetting: function () {
+		// SEUtil.debug('PDPApi.getSetting', 'ENTRY');
+		var settings = this._newResponse(0, 'OK');
+		this._setSettingProperty(settings, 'Host');
+		this._setSettingProperty(settings, 'UserName');
+		this._setSettingProperty(settings, 'Password');
+		this._setSettingProperty(settings, 'ClientId');
+		this._setSettingProperty(settings, 'ClientKey');
+		// // Default behavior in case of system or configuration issues
+		// this._setSettingProperty(settings, 'PolicyDecision');
+		// // Access denied due to system error. Try again and contact the system administrator if the problem persists.
+		// this._setSettingProperty(settings, 'PolicyMsg');
+		// // Default message if the user is not authorized or no applicable policies
+		// this._setSettingProperty(settings, 'PolicyDefaultMsg');
+
+		//var result = this._newResponse(0, 'OK'),
+		//	jsonstr = new global.JSON().encode(settings);
+		////result.textContent = jsonstr;
+		//result.setAttribute('value', jsonstr);
+		//gs.info('getSetting|' + jsonstr);
+		// SEUtil.debug('PDPApi.getSetting', 'LEAVE');
+	},
+	
+	syncPolicies: function() {
+	// SEUtil.debug('PDPApi.syncPolicies', 'ENTRYPOINT');
+	try {
+		var ph = new PolicyHelper();
+		if(ph.syncPolicies()){
+			var successUtc = SEUtil.getProperty('SyncPolicySuccess');			
+			var successTime =  JSON.parse(successUtc);
+			this._newResponse(0, successTime);			
+		}
+		else{
+			var successUtc = SEUtil.getProperty('SyncPolicySuccess');			
+			var successTime =  JSON.parse(successUtc);
+			var failedUtc = SEUtil.getProperty('SyncPolicyFailed');			
+			var failedTime =  JSON.parse(failedUtc);
+			this._newResponse(ERROR_STATUS_CODE, failedTime);
+			this._newResponse(10001, successTime);
+		}
+	} catch(e) {
+		    var successUtc = SEUtil.getProperty('SyncPolicySuccess');			
+			var successTime =  JSON.parse(successUtc);
+			var failedUtc = SEUtil.getProperty('SyncPolicyFailed');			
+			var failedTime =  JSON.parse(failedUtc);
+			this._newResponse(ERROR_STATUS_CODE, failedTime);
+			this._newResponse(10001, successTime);
+		SEUtil.debug('PDPApi.syncPolicies', 'sync polic errors: {0}', e.message);
+		}
+		// SEUtil.debug('PDPApi.syncPolicies', 'LEAVE');
+	},
+	
+	syncPolicyModel: function() {
+		SEUtil.debug('PDPApi.syncPolicyModel', 'ENTRYPOINT');
+		try {
+			var strPolicyModelResource = this.getParameter('sysparm_data');
+			SEUtil.debug('PDPApi.syncPolicies', 'strPolicyModelResource: {0}', strPolicyModelResource);
+			var consoleClient = new CommunicateWithWebConsole();
+			consoleClient.loadSettings();
+			if(consoleClient.SyncPolicyModel(strPolicyModelResource)){
+				this._newResponse(0, 'sync policy model success!');
+			}
+			else{
+				this._newResponse(ERROR_STATUS_CODE, 'sync policy model failed!');
+				}
+		} catch(ex) {
+			this._newResponse(ERROR_STATUS_CODE, 'sync policy model failed!');
+			SEUtil.debug('PDPApi.syncPolicyModel', 'sync policy model error: {0}', ex);
+		}
+		//this._newResponse(0, 'OK');
+		SEUtil.debug('PDPApi.syncPolicyModel', 'LEAVE');
+	},	
+
+	/** read property and write its value to attributes
+	 * @param {settings} settings The response xml element for `<answer/>`
+	 * @param {string} name The key for the property to get, avoid using status and message
+	 * @param {string} [attrName] The attribute name, by default, the lowercase of name
+	 */
+	_setSettingProperty: function (settings, name, attrName) {
+		var propval = gs.getProperty(PDPApi.APP_SCOPE_NAME + '.' + name);
+		if (undefined != propval) {
+			// settings[name.toLowerCase()] = propval;
+			settings.setAttribute(attrName ? attrName : name.toLowerCase(), propval);
+		}
+	},
+
+	/**
+	 * get all parameters we need from general settings page
+	 * @return {object} 
+	 */
+	_getGeneralSettingParams: function () {
+		var data = {
+			host: this.getParameter('sysparm_host'),
+			pcHttps: this._getBoolParam('sysparm_pchttps', true),
+			oauthHttps: this._getBoolParam('sysparm_oauthhttps', true),
+			// pcHost: this.getParameter('sysparm_pchost'),
+			// oauthHost: this.getParameter('sysparm_oauthhost'),
+			username: this.getParameter('sysparm_username'),
+			password: this.getParameter('sysparm_password'),
+			clientId: this.getParameter('sysparm_clientid'),
+			clientKey: this.getParameter('sysparm_clientkey')
+		};
+
+		var hosts = SEUtil.buildCCAndJPCHosts(data.host);
+		data.pcHost = hosts.jpc;
+		data.oauthHost = hosts.jpc;
+
+		data.pcPort = this._getIntParam('sysparm_pcport', 443);
+		data.oauthPort = this._getIntParam('sysparm_oauthport', 443);
+		
+		return data;
+	},
+	/**
+     * Retrieves the parameter value mapped by {key} if it exists and is a number or {defval}.
+     * @param {string} key This is the parameter name
+     * @param {*} [defval] Optional. This is the default value
+     * @return The number value of the parameter. If the paramter doesn't exist, {defval} is returned
+     */
+	_getIntParam: function (key, defval) {
+		var val = Number(this.getParameter(key));
+		return isNaN(val) ? defval : val;
+	},
+	
+	/**
+     * Retrieves the parameter value mapped by {key} if it exists and is a boolean or {defval}.
+     * @param {string} key This is the parameter name
+     * @param {*} [defval] Optional. This is the default value
+     * @return The boolean value of the parameter. If the paramter doesn't exist, {defval} is returned
+     */
+	_getBoolParam: function (key, defval) {
+		var val = this.getParameter(key);
+		return null != val ? 'true' == val : defval;
+	},
+
+	/**
+	 * Test connection via ServiceNow API RESTMessageV2 HTTP methods and construct the response xml
+	 * @param {string} url The URL of the REST provider you want to interface with
+	 * @param {string=} body request body content to send using HTTP POST or HTTP GET if body is empty
+	 */
+	_testConnection: function (url, body) {
+		// record the execution time
+		var gdtBGN = new GlideDateTime(), gdtEND, elapsedMs;
+		var result, timeoutMs = 6000;
+		try {
+			var request = new sn_ws.RESTMessageV2(); //Might throw exception if message doesn't exist or not visible due to scope.
+
+			// https://developer.servicenow.com/app.do#!/api_doc?v=istanbul&id=RMV2-setLogLevel_S
+			// https://community.servicenow.com/community/develop/developer-relations/blog/2016/12/13/outbound-http-request-logging-in-detail
+			request.setLogLevel && request.setLogLevel('all'); // basic, elevated, or all (Request body & Response body). System Logs -> Outbound HTTP Requests
+			request.setEndpoint(url);
+
+			//setStringParameter: Set a REST message function variable with the specified name from the REST message record to the specified value.
+			//request.setStringParameter('grant_type', 'client_credentials');
+			//request.setStringParameter('client_id', clientId);
+			//request.setStringParameter('client_secret', clientKey);
+
+			if (body) {
+				request.setHttpMethod('POST');
+				request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+				request.setRequestBody(body);
+				requestBody = request.getRequestBody();
+				//SEUtil.info('PDPApi._testConnection', 'url={0}, requestBody = {1}', url, requestBody);
+			} else {
+				request.setHttpMethod('GET');
+			}
+
+			request.setHttpTimeout(timeoutMs); // Number timeoutMs
+			var response = request.execute();
+
+			// [Unable to make async rest request from a before business rule?](https://community.servicenow.com/thread/179343)
+			if (response.haveError()) {
+
+				// Except for "javax.net.ssl.SSLPeerUnverifiedException: peer not authenticated", other are considered as a failure.
+				var errmsg = response.getErrorMessage(); // `response.getBody()` also returns this error message.
+				SEUtil.error('PDPApi._testConnection', 'url={0}, response: errcode={1}, errmsg={2}', url, response.getStatusCode(), errmsg);
+
+				if (0 <= errmsg.indexOf('TimeoutException')) {
+					//e.g. java.net.SocketTimeoutException: connect timed out when posting to https://122.225.229.110/cas
+					result = this._newResponse(1, 'Connection timed out ' + timeoutMs + ' ms');
+
+				} else if (0 <= errmsg.indexOf('UnknownHostException')) {
+
+					result = this._newResponse(2, 'Connection unreachable');
+
+				} else if (0 > errmsg.indexOf('SSLPeerUnverifiedException')) {
+					
+					// Now, it returns "org.apache.commons.httpclient.HttpException: SSLPeerUnverifiedException", 
+					//    not "javax.net.ssl.SSLPeerUnverifiedException"
+					// other cases: e.g 
+					// if Endpoint is https://1.2.3.4, errmsg is "Socket error"
+					// if Endpoint is https://1.2.3.4/cas/token, errmsg is "Connection timed out 6000 ms"
+					result = this._newResponse(3, errmsg);
+
+				} else {
+					result = this._newResponse(ERROR_STATUS_CODE, errmsg);
+				}
+
+			} else {
+
+				var resBody = response.getBody();
+
+				if (resBody && 50 < resBody.length) {
+					resBody = resBody.substr(0, 50) + '**body truncated**';
+				}
+
+				// SEUtil.debug('PDPApi._testConnection', 'url={0}, response: status = {1}, body={2}', url, response.getStatusCode(), resBody);				
+
+				if(url && url.indexOf(CC_PATH) > -1) {
+					var jsonRes = JSON.parse(response.getBody());
+
+					if(jsonRes.error) {
+						result = this._newResponse(ERROR_STATUS_CODE, jsonRes.error);
+					} else {
+						result = this._newResponse(0, 'OK');
+					}
+				} else {
+					result = this._newResponse(0, 'OK');
+				}
+			}
+
+		} catch (ex) {
+			SEUtil.logThrow('PDPApi._testConnection', ex, 'url=' + url);
+			result = this._newResponse(-1, 'InternalException');
+		} finally {
+			gdtEND = new GlideDateTime();
+			elapsedMs = GlideDateTime.subtract(gdtBGN, gdtEND); //the difference between gdtStart and gdtEnd
+			elapsedMs = elapsedMs.getByFormat('HH:mm:ss.SSS');
+			// SEUtil.debug('PDPApi._testConnection', 'Elapsed time in milliseconds is {0} from {1}.{2} to {3}.{4}, TZOffset in milliseconds is ' + gdtBGN.getTZOffset(), elapsedMs, gdtBGN.getDisplayValue(), gdtBGN.getNumericValue() % 1000, gdtEND.getDisplayValue(), gdtEND.getNumericValue() % 1000);
+			result.setAttribute('ElapsedMilliseconds', elapsedMs);
+		}
+		return result;
+	},
+
+	/**
+     * Save property. Sets the specified key to the specified value.
+     * 
+     * Note: Care should be taken when setting system properties (sys_properties) using this method
+	 * as it causes a system-wide cache flush. Each flush can cause system degradation while the caches
+	 * rebuild. If a value must be updated often, it should not be stored as a system property. In general,
+	 * you should only place values in the sys_properties table that do not frequently change.
+	 * 
+     * @param {string} name The key for the property to be set.
+     * @param {object} value The value of the property to be set, not null or undefined
+	 * @param {string} [description] A description of the property.
+     * @return {string} unique id of new or updated record, but undefined if parameters are invalid.
+	 * @see [Scoped GlideSystem - setProperty(String key, String value, String description)](https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideSystemScoped/concept/c_GlideSystemScopedAPI.html).
+     */
+	_saveProperty: function (name, value, description) {
+		if ('string' != typeof name || null == value) return;
+
+		// Note: If app scope represented by `gs.getCurrentApplicationId()` is different with the scope represented by `gs.getCurrentScopeName()`,
+		// it won't be successfully saved for `gs.setProperty` but it's ok for `GlideRecord.update`.
+		//SEUtil.debug('PDPApi._saveProperty', '{0} = {1}', name, value);
+
+		// The value must be string, otherwise for an integer (of type number), e.g. 80 will be saved as 80.0. Why...
+		// gs.setProperty(PDPApi.APP_SCOPE_NAME + '.' + name, value.toString(), description);
+		// SEUtil.setProperty(name, value.toString(), description);
+
+		var prop = new GlideRecordSecure('sys_properties');
+		// prop.addQuery('name', PDPApi.APP_SCOPE_NAME + '.' + name);
+		// prop.query();
+		// if(prop.next()){
+		// 	prop.setValue('value', value.toString());
+		// 	return prop.update();
+		// }
+		
+		// Sometime `update()` throws Write operation against 'sys_properties' from scope 'x_159404_myapp' has been refused due to the table's cross-scope access policy
+		if(prop.get('name', PDPApi.APP_SCOPE_NAME + '.' + name)) {
+		}
+		// if (successful) {
+		// 	// var oldval = prop.getValue('value');
+		// 	// SEUtil.trace('PDPApi._saveProperty', name + '(' + uid + '): ' + value + ' vs ' + oldval);
+		// }
+		prop.setValue('value', value); // prop.value = value.toString();
+		var uid = prop.update('_saveProperty');
+		SEUtil.debug('PDPApi._saveProperty', 'LEAVE, callerScopeName={0}, currentScopeName={1}', gs.getCallerScopeName(), gs.getCurrentScopeName());
+		return uid;
+	},
+
+	/** build new response xml element for `<answer/>` with attributes: status and message
+	 * @param {number} status
+	 * @param {string} message
+	 * @return the new element
+	 */
+	_newResponse: function (status, message) {
+		var result = this.newItem('answer');
+		result.setAttribute('status', status);
+		result.setAttribute('message', message);
+		return result;
+	},
+
+	type: 'PDPApi'
+});]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-08 06:26:26</sys_created_on>
+        <sys_id>5b6b1f294f5203003ab4e9628110c717</sys_id>
+        <sys_mod_count>87</sys_mod_count>
+        <sys_name>PDPApi</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy>read</sys_policy>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_script_include_5b6b1f294f5203003ab4e9628110c717</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-04-19 02:59:38</sys_updated_on>
+    </sys_script_include>
+</record_update>

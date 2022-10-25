@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<database>
+    <element label="EntityColumn" max_length="40" name="x_230565_emsn_entitycolumn" type="collection">
+        <element attributes="edge_encryption_enabled=true" label="Active" max_length="40" name="active" type="boolean"/>
+        <element label="Column" max_length="1024" name="column" type="string"/>
+        <element attributes="edge_encryption_enabled=true" label="Column ID" max_length="32" name="column_id" reference="sys_dictionary" type="reference"/>
+        <element attributes="edge_encryption_enabled=true" default="javascript:current.column.toString().split('.').length - 1" label="Dots" max_length="40" name="dots" type="integer"/>
+        <element attributes="edge_encryption_enabled=true" default="False" label="Is Reference" max_length="40" name="is_reference" type="boolean"/>
+        <element default="javascript: current.column_id.column_label" display="true" label="Label" max_length="1024" name="label" type="string"/>
+        <element label="Name" max_length="40" name="name" type="string"/>
+        <element label="Type" max_length="40" name="type" type="string"/>
+        <index name="index">
+            <element name="column_id"/>
+        </index>
+    </element>
+</database>

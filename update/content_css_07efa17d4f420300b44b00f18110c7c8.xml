@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="content_css">
+    <content_css action="INSERT_OR_UPDATE">
+        <name>common.css</name>
+        <style>/* ------base rules------ */&#13;
+*{&#13;
+    font-family: 'Arial';&#13;
+    font-weight: 400;&#13;
+    font-style: normal;&#13;
+    color: #333333;    &#13;
+}&#13;
+body, ul, li{&#13;
+    margin: 0;&#13;
+    padding: 0;&#13;
+    list-style-type: none;&#13;
+}&#13;
+&#13;
+/* ------layouts------ */&#13;
+.sider{&#13;
+    position: fixed;&#13;
+    width: 250px;&#13;
+    height: 100vh;&#13;
+    background-color: #303a46;&#13;
+}&#13;
+&#13;
+.col{&#13;
+    display: inline-block;&#13;
+    vertical-align: top;&#13;
+}&#13;
+&#13;
+/* ------modules------ */&#13;
+.box{&#13;
+    display: inline-block;&#13;
+    vertical-align: top;&#13;
+}&#13;
+.block{&#13;
+    display: block;&#13;
+}&#13;
+.hide{&#13;
+    display: none !important;&#13;
+}&#13;
+.btn{&#13;
+    cursor: pointer;&#13;
+}&#13;
+/* ------themes------ */&#13;
+.font-sm{&#13;
+    font-size: 11px;&#13;
+}&#13;
+.font-md{&#13;
+    font-size: 13px;&#13;
+}&#13;
+.font-lg{&#13;
+    font-size: 16px;&#13;
+}&#13;
+.font-default{&#13;
+    font-weight: 400;&#13;
+}&#13;
+.font-bold{&#13;
+    font-weight: 700;&#13;
+}&#13;
+.font-red{&#13;
+    color: #c03;&#13;
+}&#13;
+.font-green{&#13;
+    color: #696;&#13;
+}</style>
+        <sys_class_name>content_css</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-10-27 06:58:11</sys_created_on>
+        <sys_id>07efa17d4f420300b44b00f18110c7c8</sys_id>
+        <sys_mod_count>1</sys_mod_count>
+        <sys_name>common.css</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>content_css_07efa17d4f420300b44b00f18110c7c8</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2017-11-02 02:18:44</sys_updated_on>
+        <type>local</type>
+        <url/>
+    </content_css>
+</record_update>

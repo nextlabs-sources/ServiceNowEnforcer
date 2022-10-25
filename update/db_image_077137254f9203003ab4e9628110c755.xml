@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="db_image">
+    <db_image action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <category/>
+        <format>png</format>
+        <height>32</height>
+        <image/>
+        <name>nxl_export.png</name>
+        <size_bytes>1111</size_bytes>
+        <sys_class_name>db_image</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-08 08:01:16</sys_created_on>
+        <sys_id>077137254f9203003ab4e9628110c755</sys_id>
+        <sys_mod_count>1</sys_mod_count>
+        <sys_name>nxl_export.png</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>db_image_077137254f9203003ab4e9628110c755</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2017-11-08 08:01:23</sys_updated_on>
+        <thumbnail/>
+        <width>32</width>
+    </db_image>
+    <sys_attachment action="INSERT_OR_UPDATE">
+        <average_image_color>#a3a3a3</average_image_color>
+        <chunk_size_bytes/>
+        <compressed>true</compressed>
+        <content_type>image/png</content_type>
+        <file_name>image</file_name>
+        <image_height>32</image_height>
+        <image_width>32</image_width>
+        <size_bytes>1111</size_bytes>
+        <size_compressed>1119</size_compressed>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-08 08:01:23</sys_created_on>
+        <sys_id>238177254f9203003ab4e9628110c778</sys_id>
+        <sys_mod_count>2</sys_mod_count>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2017-11-08 08:01:23</sys_updated_on>
+        <table_name>ZZ_YYdb_image</table_name>
+        <table_sys_id>077137254f9203003ab4e9628110c755</table_sys_id>
+    </sys_attachment>
+    <sys_attachment_doc action="INSERT_OR_UPDATE">
+        <data>H4sIAAAAAAAAAA==</data>
+        <length>16</length>
+        <position>0</position>
+        <sys_attachment display_value="image" sys_id="238177254f9203003ab4e9628110c778">238177254f9203003ab4e9628110c778</sys_attachment>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-08 08:01:23</sys_created_on>
+        <sys_id>638177254f9203003ab4e9628110c778</sys_id>
+    </sys_attachment_doc>
+    <sys_attachment_doc action="INSERT_OR_UPDATE">
+        <data>6wzwc+flkuJiYGDg9fRwCQLSCiDMwQwkXZZ0HQNSLOmOvo4MDBv7uf8ksgL5jMVB7k4M687JvASpTPYI8mVgqFJjYGhoYWD4BRRqeMHAUGrAwPAqgYHBagYDg3jBnF2BNkB9GQE+Ia7/////9+/funXrZs6cuWjRojt37sybNw+oi4mJKT8//8+fP5WVlcHBwR0dHaWlpcLCwkJCQhEREXPmzLG0tLx165a0tHRoaOjv37+lpKSOHj164cKFGTNmcHFxffv27d69e9zc3MbGxoKCgvPnz2djY+vr63v9+vWECRMePHjg5+eXnJxcVVV18+bN+/fv3717t6io6P379+Xl5ZmZmWFhYUpKSnZ2dufPn29ubt6+ffuNGzfi4+M5OTn37Nnz7t07MTGxjIyM1atX19fXS0hIfPnyRVRUND09/fTp058/f165cuWOHTuePXv269cvGRmZxYsXCwgIHD9+XF9fn4+Pj5GR0cXFJTExMS0t7cePH0uXLg0JCXn+/Hltba2/vz8LCwsrK+vXr18rKipaWlrWrl07depUMzMzNze3LVu2bN68effu3bdv3966dauWllZAQMCTJ0/OnDmzb9++6dOn79+/39PT09bWduLEicuXLz9w4MChQ4dWrVp16tQpE0+PvaDISvJ2d2HoYJX1AHI4Czwii4G0Bxi7ncy2AyoI8nRxDLE4vfbS9bBDDgJsDwSPcm507YzYwBIYKNKb4LiRhbuM1VWk+v3efftmO51SOy79J/+bymfVmTd1DuxfeiQ0y2/mbLanGbyPE9cuYNJe/SUkmbd9qw7rqx5u86qfVV9M/7A2iJk5cFsz7BO0vdW7LC37uBbDvOQrmX99vFezbkncraDeIOtle6MzVuwAV+vbF2Gv1gl8+1F1+J+d8xf3JzwnGq4kBogcXZjB0+6+Zm+PkIHbq9Yjx9WFUmbO4Zrgk53QZmyvqprOOWPywT1sDo/EFFz/3X90yejAqVdSfzmVrpk77dA8cmmmrty2zRsWfxH3fMmwpMRP0njf7Dun3zcv4XthzODB3u5+auHHtv7FE4K/eVgYMlr4rnh982dryvuDU06XfHgVdbpXeMfR3TWJk99rfvjg8avm0PPpa6bJsF757DA31bph0YHVGael971+wDx30k+TuO9f306Q17Dbz9TvorDx5kdQZlAtcY0oSUksSbVKLkoFUgxGBobmugbGuoZmIQYmVsYGVqZAromVgcHTZ7zbUDTk5qdkplXi1jBl91ZQvq2vCokoKS5Lt0pKLE7VLS3KZGDguB57xpHvkIKAw0XhixNvZQpvV7vX7JfO5VkooFFR8/jcjr8nfwvx7WN0KJasen9hz7QoB6PNirVm56Z+dpBydGX6e9xY9tU2psn2b49xZsbV+CpHxih3z47n6H//6t9qnv2Tn0k9yrvQd/lr0+mAW/8YPzw23KIkfzsF6BQGT1c/l3VOCU0AAQqqN1cEAAA=</data>
+        <length>1480</length>
+        <position>1</position>
+        <sys_attachment display_value="image" sys_id="238177254f9203003ab4e9628110c778">238177254f9203003ab4e9628110c778</sys_attachment>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-08 08:01:23</sys_created_on>
+        <sys_id>e38177254f9203003ab4e9628110c778</sys_id>
+    </sys_attachment_doc>
+</record_update>

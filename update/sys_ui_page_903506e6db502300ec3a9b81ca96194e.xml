@@ -1,0 +1,606 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ui_page">
+    <sys_ui_page action="INSERT_OR_UPDATE">
+        <category>cms</category>
+        <client_script><![CDATA[// document.getElementById('uninstallBtn').onclick = parent.ajaxUninstallSysScript;]]></client_script>
+        <description>Pure HTML of GeneralSettings used as iframe in &lt;iframe id="gsft_main" allowfullscreen="true" main-pane="true" name="gsft_main" title="ServiceNow" src="home_splash.do?sysparm_direct=true" data-original-title="Main Content"/&gt; &#13;
+&#13;
+See https://community.servicenow.com/community?id=community_blog&amp;sys_id=e26e22eddbd0dbc01dcaf3231f96196e : &#13;
+instance.service-now.com/x_230565_emsn_GeneralSettings.do?sysparm_direct=true&#13;
+&#13;
+To encode a non-breaking space (&amp;nbsp;), you can use $[SP]</description>
+        <direct>false</direct>
+        <endpoint>x_230565_emsn_GeneralSettings.do</endpoint>
+        <html><![CDATA[<?xml version="1.0" encoding="utf-8" ?>
+<j:jelly trim="false" xmlns:j="jelly:core" xmlns:g="glide" xmlns:j2="null" xmlns:g2="null">
+<!-- <!DOCTYPE html> Error at line (3) A DOCTYPE is not allowed in content. -->
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<meta http-equiv="X-UA-Compatible" content="ie=edge" />
+	<title>General Settings</title>
+	<style type="text/css">
+	/* ------base rules------ */
+	
+	* {
+		font-family: "Arial";
+		font-weight: 400;
+		font-style: normal;
+		color: #333333;
+		box-sizing: content-box;
+	}
+	*:focus {
+		outline: 0;
+	}
+	body,
+	ul,
+	li {
+		margin: 0;
+		padding: 0;
+		list-style-type: none;
+	}
+	/* ------layouts------ */
+	
+	.grid {
+		height: auto;
+	}
+	.sider {
+		position: fixed;
+		width: 250px;
+		height: 100vh;
+		background-color: #303a46;
+	}
+	.header {
+		padding: 0;
+	}
+	.content {
+		padding: 0;
+	}
+	.col {
+		display: inline-block;
+		vertical-align: top;
+	}
+	.content-header {
+		padding: 20px;
+		min-width: 438px;
+		height: 100px;
+	}
+	.content-body {
+		padding: 0 40px;
+	}
+	.content-footer {
+		height: 100px;
+		line-height: 100px;
+		padding: 20px 40px 0 40px;
+		background-image: url("nxl_bg_shadow.png");
+		background-size: 100% 100%;
+		background-repeat: no-repeat;
+	}
+	/* ------modules------ */
+	
+	.unfolder-wrap {
+		position: absolute;
+		display: inline-block;
+		vertical-align: top;
+	}
+	.unfolder-wrap-attr {
+		left: 0;
+		right: 0;
+		/* top: 0;    bottom: 0; */
+		
+		margin: auto 0 auto auto;
+		width: 24px;
+		height: 24px;
+	}
+	.unfolder,
+	.unfolder::before,
+	.unfolder::after {
+		position: absolute;
+		width: 4px;
+		height: 4px;
+		border: 0 solid transparent;
+		border-radius: 20px;
+		background-color: #666;
+		display: inline-block;
+	}
+	.unfolder {
+		top: 0;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		margin: auto;
+	}
+	.unfolder::before {
+		content: "";
+		top: -8px;
+		left: 0;
+		right: 0;
+		margin: auto;
+	}
+	.unfolder::after {
+		content: "";
+		top: 8px;
+		left: 0;
+		right: 0;
+		margin: auto;
+	}
+	.box {
+		display: inline-block;
+		vertical-align: top;
+	}
+	.link {
+		color: #18b;
+		cursor: pointer;
+	}
+	.block {
+		display: block;
+	}
+	.hide {
+		display: none !important;
+	}
+	.btn {
+		cursor: pointer;
+	}
+	.checkbox+label {
+		width: 24px;
+		height: 24px;
+		background-image: url("nxl_checkbox_unchecked.png");
+		background-size: contain;
+		background-repeat: no-repeat;
+	}
+	.checkbox:checked+label {
+		background-image: url("nxl_checkbox.png");
+	}
+	/* ------themes------ */
+	
+	.btn-disabled {
+		background-color: #eee;
+		color: #999;
+		border-color: transparent;
+	}
+	.btn-default {
+		border: 1px solid #aaa;
+		background-color: #efefef;
+		font-size: 11px;
+	}
+	.btn-default:hover {
+		background-color: #ddd;
+	}
+	.btn-sm {
+		width: 100px;
+		height: 30px;
+		line-height: 30px;
+	}
+	.btn-md {
+		width: 120px;
+		height: 30px;
+		line-height: 30px;
+	}
+	.font-italic {
+		font-style: italic
+	}
+	.font-sm {
+		font-size: 11px;
+	}
+	.font-md {
+		font-size: 13px;
+	}
+	.font-lg {
+		font-size: 16px;
+	}
+	.font-default {
+		font-weight: 400;
+	}
+	.font-bold {
+		font-weight: 700;
+	}
+	.font-red {
+		color: #c03;
+	}
+	.font-green {
+		color: #696;
+	}
+	.font-blue {
+		color: #18b;
+	}
+	/* background colors */
+	
+	.bg-black {
+		background-color: #000;
+		color: #fff;
+	}
+	.bg-white {
+		background-color: #fff;
+		color: #333;
+	}
+	.bg-gray {
+		background-color: #eee;
+		color: #333;
+	}
+	.bg-gray-light {
+		background-color: rgba(200, 200, 200, 0.1);
+		color: #333;
+	}
+	.bg-transparent {
+		background-color: transparent;
+		color: #333;
+	}
+	/* tables */
+	
+	.td-sm {
+		width: 48px;
+		height: 48px;
+	}
+	.td-md {
+		width: 143px;
+		height: 48px;
+	}
+	.td-lg {
+		width: 173px;
+		height: 48px;
+	}
+	/* mask */
+	
+	@media (max-device-width: 1024px) {
+		.mask {
+			position: absolute;
+			left: 0;
+			right: 0;
+			top: 0;
+			bottom: 0;
+			margin: auto;
+			background-color: rgba(0, 0, 0, 0.1);
+			z-index: 12;
+		}
+	}
+	@media (min-device-width: 1025px) {
+		.mask {
+			display: none;
+		}
+	}
+	</style>
+	<style type="text/css">
+	.topbar {
+		padding: 5px 20px;
+		height: 30px;
+		border-width: 0 0 1px 0;
+		border-style: solid;
+		border-color: #ddd;
+	}
+	.sep-v {
+		width: 1px;
+		height: calc(100% - 10px);
+		border: 0;
+		background: #ddd;
+		margin: 5px 0;
+	}
+	.topbar-btn-text {
+		line-height: 30px;
+	}
+	.topbar-btn-wrap {
+		padding: 0 10px;
+	}
+	.co-title-wrap {
+		/* width: 200px; */
+		font-size: 0;
+	}
+	.co-title {
+		width: auto;
+		height: 15px;
+	}
+	.co-title-desc {
+		margin: 0;
+		padding: 1.5px 0;
+		color: #999;
+	}
+	.save-icon {
+		width: 24px;
+		height: 24px;
+		margin: 3px;
+		background-image: url("nxl_save.png");
+		background-repeat: no-repeat;
+		background-size: contain;
+	}
+	.discard-icon {
+		width: 24px;
+		height: 24px;
+		margin: 3px;
+		background-image: url("nxl_discard.png");
+		background-repeat: no-repeat;
+		background-size: contain;
+	}
+	.export-icon {
+		width: 24px;
+		height: 24px;
+		margin: 3px;
+		background-image: url("nxl_export.png");
+		background-repeat: no-repeat;
+		background-size: contain;
+	}
+	.import-icon {
+		width: 24px;
+		height: 24px;
+		margin: 3px;
+		background-image: url("nxl_import.png");
+		background-repeat: no-repeat;
+		background-size: contain;
+	}
+	@media (min-device-width: 1025px) {
+		#topbarExportAndSaveBtn {
+			display: inline-block !important;
+		}
+	}
+	@media (max-device-width: 1024px) {
+		#topbarExportAndSaveBtn {
+			display: none !important;
+		}
+	}
+	</style>
+	<style type="text/css">
+	/* ------layouts------ */
+	/* ------modules------ */
+	
+	.content-header-avatar {
+		width: 64px;
+		height: auto;
+		margin: 10px 20px;
+	}
+	.content-title-wrap {}
+	.content-title {
+		margin: 0;
+		padding: 10px 0;
+	}
+	.content-title-desc {
+		margin: 0;
+		color: #999;
+	}
+	.sep-title-h {
+		background-color: #ddd;
+		border: 0;
+		height: 1px;
+	}
+	.sep-section-h {
+		background-image: url("nxl_sep_shadow.png");
+		background-size: 100% 100%;
+		background-repeat: no-repeat;
+		border: 0;
+		height: 30px;
+	}
+	.section-title {
+		margin: 0;
+		padding: 10px 0;
+	}
+	.section-title-desc {
+		margin: 0 0 10px 0;
+		color: #999;
+	}
+	.section-sub-title-wrap {
+		width: 60%;
+	}
+	.form-control-group {
+		padding: 10px 0;
+	}
+	.form-control {
+		margin: 5px 0;
+		overflow: hidden;
+	}
+	.form-label {
+		line-height: 16px;
+	}
+	.form-input {
+		width: 100%;
+		padding: 4px;
+		border: 1px solid #ddd;
+		box-sizing: border-box;
+	}
+	.form-input-inline {
+		width: 64px;
+		height: 16px;
+		padding: 4px;
+		border: 1px solid #ddd;
+		text-align: center;
+	}
+	.form-submit {
+		width: 140px;
+		height: 30px;
+		/* line-height: 30px; */
+		
+		text-align: center;
+	}
+	.form-select {
+		width: 140px;
+		height: 30px;
+		line-height: 30px;
+		text-align: center;
+	}
+	.form-textarea {
+		width: 60%;
+		height: 52px;
+		padding: 4px;
+		border: 1px solid #ddd;
+		resize: none;
+	}
+	.https-input {
+		width: 40%;
+	}
+	.https-wrap {
+		padding: 0 10px;
+		margin: 5px 0;
+		display: inline-block;
+	}
+	/* >, &gt;, &#x3e; \3e, ${AMP}lt;, ${AND}, ${AMP}gt;, ${AMP}#62;, $[AMP], \>; $[GT] */
+	.https-wrap input[type=checkbox] {
+		width: 24px;
+		height: 24px;
+		vertical-align: top;
+		margin: 0;
+		padding: 0;
+	}
+	.https-wrap label {
+		line-height: 24px;
+	}
+
+	input[type=submit] {
+		background-color: #eee;
+		border: 1px solid #999;
+	}
+	input[type=submit]:disabled {
+		background-color: #efefef !important;
+		border: 1px solid #ddd !important;
+		color: #999 !important;
+		cursor: not-allowed !important;
+	}
+	input[type=submit]:hover {
+		cursor: pointer;
+		background-color: #ddd;
+	}
+	.content-footer input:not(:last-child) {
+		margin-right: 20px;
+	}
+	@media screen and (min-width: 500px) { /* calc(50% - MIN_VIEW_WIDTH) */
+		.form-row .form-control-group {
+			display: inline-block;
+			/* vertical-align: middle; */
+			width: calc(50% - 10px); /* calc(100%/COLUMN_COUNT - ROW_SPACING/COLUMN_COUNT) */
+		}
+		.form-row .form-control-group:not(:first-child) {
+			padding-left: 20px; /* @VAR ROW_SPACING */
+		}
+		.content-body {
+			max-width: 500px; /* @VAR MIN_VIEW_WIDTH */
+		}
+	}
+	</style>
+</head>
+
+<body>
+	<div class="header">
+		<div class="topbar">
+			<div id="topbarHomeBtn" class="col btn co-title-wrap"> <img class="co-title" src="nxl_title_sm.png" />
+				<h6 class="co-title-desc font-sm font-bold">Entitlement Management</h6> </div>
+			<div id="topbarSaveBtn" class="col btn topbar-btn-wrap"> <i class="box save-icon"></i> <span class="topbar-btn-text font-md">Save Settings</span> </div> <!-- <i class="box sep-v"></i> -->
+			<div id="topbarDiscardBtn" class="col btn topbar-btn-wrap hide"> <i class="box discard-icon"></i> <span class="topbar-btn-text font-md">Discard Changes</span> </div>
+		</div>
+	</div>
+	<div id="fieldSelectorModal" class="overlay hide">
+		<div class="modal modal-field-selector">
+			<div class="modal-header gray-down">
+				<h4 class="modal-title font-bold">Reference Fields Selector</h4>
+				<button class="btn modal-close">X</button>
+			</div>
+			<div class="modal-body modal-field-selector-body">
+				<div id="treevieweWrap" class="treeview-wrap">
+					<!--div class="tree-node"><div class="tree-node-content"><i class="box btn attr-toggle-icon" data-expand="false">+</i><span class="table-name font-bold">Caller</span></div><div class="child-tree-node"><div class="tree-node-content"><div class="box checkbox-sm-wrap"><input id="user.name" type="checkbox" class="checkbox-sm hide" /><label for="user.name" class="box"></label></div><span class="field-name">Name</span></div><div class="tree-node-content"><div class="box checkbox-sm-wrap"><input id="user.email" type="checkbox" class="checkbox-sm hide" /><label for="user.email" class="box"></label></div><span class="field-name">Email</span></div><div class="tree-node"><div class="tree-node-content"><i class="box btn attr-toggle-icon" data-expand="false">+</i><span class="table-name font-bold">Department</span></div><div class="child-tree-node"><div class="tree-node-content"><div class="box checkbox-sm-wrap"><input id="dept.name" type="checkbox" class="checkbox-sm hide" /><label for="dept.name" class="box"></label></div><span class="field-name">Name</span></div><div class="tree-node-content"><div class="box checkbox-sm-wrap"><input id="dept.address" type="checkbox" class="checkbox-sm hide" /><label for="dept.address" class="box"></label></div><span class="field-name">Address</span></div></div></div></div></div--></div>
+			</div>
+			<div class="modal-footer modal-toolbar gray-up">
+				<button id="fieldSelectorCancelBtn" class="btn btn-default btn-sm font-md footer-btn-margin">Cancel</button>
+				<button id="fieldSelectorConfirmBtn" class="btn btn-default btn-sm font-md footer-btn-margin">Confirm</button>
+			</div>
+		</div>
+	</div>
+	<div id="overlay" class="overlay hide">
+		<div class="modal">
+			<div class="modal-header gray-down">
+				<h4 class="modal-title font-bold">Working on it...</h4>
+				<button class="btn modal-close hide">X</button>
+			</div>
+			<div class="modal-body">
+				<p id="displayMsg" class="modal-msg">Enabling NextLabs Entitlement Management for the selected ServiceNow Entities. This may take a little while...</p>
+				<p class="modal-progress-msg"> <span>Processing Entity $[SP]</span> <span id="currentIndex">1</span> <span>/</span> <span id="totalCount">0</span> <span>:$[SP]</span> <span id="currentEntityName"></span> </p>
+				<div class="bar-wrap">
+					<div id="progressBar" class="bar"></div>
+				</div>
+			</div>
+			<div class="modal-footer modal-toolbar gray-up hide">
+				<button id="export-cancel-btn" class="btn btn-default btn-sm btn-ms">Cancel</button>
+				<button id="export-confirm-btn" class="btn btn-default btn-sm btn-ms">Export</button>
+			</div>
+		</div>
+	</div>
+	<div class="content">
+		<div>
+			<div class="content-header"> <img class="box content-header-avatar" src="nxl_general_settings.png" />
+				<div class="box content-title-wrap">
+					<h2 class="content-title font-bold">General Settings</h2>
+					<p class="content-title-desc font-md">Policy Server and other Entitlement Management settings</p>
+				</div>
+				<hr class="sep-title-h" /> </div>
+			<div class="content-body">
+				<div class="section">
+					<div class="section-title-wrap">
+						<h3 class="section-title font-lg font-bold">NextLabs Platform Configuration</h3>
+						<hr class="sep-title-h" /> </div>
+					<div class="section-content">
+						<form>
+							<div class="form-control-group">
+								<label for="host" class="block form-label font-md font-bold">Policy Server Host</label>
+								<input id="host" class="form-control form-input" type="text" placeholder="&lt;Example: nxldemo.nextlabs.solutions&gt;" />
+							</div>
+							<div class="form-row">
+								<div class="form-control-group">
+									<label for="username" class="form-control form-label font-md font-bold">User Name</label>
+									<input id="username" class="block form-control form-input" type="text" placeholder="Login username to Policy Configuration" />
+								</div>
+								<div class="form-control-group">
+									<label for="password" class="form-control form-label font-md font-bold">Password</label>
+									<input id="password" class="block form-control form-input" type="password" placeholder="Login password to Policy Configuration" />
+								</div>
+							</div>
+							<p class="font-md" style="font-weight: bold;">Indentifier for Nextlabs Entitlement Management</p>
+							<div class="form-row">
+								<div class="form-control-group">
+									<label for="clientId" class="form-control form-label font-md font-bold">Client ID</label>
+									<input id="clientId" class="block form-control form-input" type="text" placeholder="&lt;Example: apiclient&gt;" />
+								</div>
+								<div class="form-control-group">
+									<label for="clientKey" class="form-control form-label font-md font-bold">Client Secret Key</label>
+									<input id="clientKey" class="block form-control form-input" type="password" placeholder="&lt;Example: 123dynamics!&gt;" />
+								</div>
+							</div>
+							<div class="form-control-group">
+								<input id="testConnectionBtn" class="form-control form-submit" type="submit" value="Verify Connection" />
+								<label id="testConnnectionError" class="block form-control form-label font-md font-red hide">X Connection could not be established.</label>
+								<label id="testConnnectionMsg" class="block form-control form-label font-md font-green"></label>
+							</div>
+						</form>
+					</div>
+				</div>
+			</div>
+			<div class="content-footer">
+				<input id="gsSaveBtn" type="submit" class="form-control form-submit" value="Save Settings" />
+				<j:if test="${gs.getProperty('instance_name').startsWith('dev')}">
+					<input id="uninstallBtn" type="button" class="form-control form-submit" value="Delete This Application" onclick="parent.ajaxUninstallSysScript();" />
+				</j:if>
+				<input id="gsDiscardBtn" type="submit" class="hide form-control form-submit" value="Discard Changes" /> </div>
+		</div>
+		<script src="x_230565_emsn.promise-polyfill.jsdbx"></script>
+		<script src="x_230565_emsn.nxl_util.jsdbx"></script>
+		<script src="x_230565_emsn.nxl-sn-sdk.jsdbx"></script>
+		<g2:evaluate var="jvar_stamp">
+			var gr = new GlideRecord('sys_ui_script');
+			gr.get('name', 'x_230565_emsn.general-settings') ? gr.getValue('sys_updated_on') : '';
+		</g2:evaluate>
+		<g:requires name="x_230565_emsn.general-settings.jsdbx" params="cache=$[jvar_stamp]" />
+	</div>
+</body>
+
+</html>
+</j:jelly>]]></html>
+        <name>GeneralSettings</name>
+        <processing_script/>
+        <sys_class_name>sys_ui_page</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-09-05 09:44:42</sys_created_on>
+        <sys_id>903506e6db502300ec3a9b81ca96194e</sys_id>
+        <sys_mod_count>61</sys_mod_count>
+        <sys_name>GeneralSettings</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ui_page_903506e6db502300ec3a9b81ca96194e</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-04-19 03:27:22</sys_updated_on>
+    </sys_ui_page>
+</record_update>

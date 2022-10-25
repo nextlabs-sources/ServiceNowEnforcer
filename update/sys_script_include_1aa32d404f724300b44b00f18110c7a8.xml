@@ -1,0 +1,826 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>public</access>
+        <active>true</active>
+        <api_name>x_230565_emsn.SEUtil</api_name>
+        <client_callable>false</client_callable>
+        <description>ServiceNow Enforcer utility</description>
+        <name>SEUtil</name>
+        <script><![CDATA[var SEUtil = Class.create();
+SEUtil.prototype = {
+	initialize: function () {
+	},
+
+	type: 'SEUtil'
+};
+SEUtil.onceID = new Date().valueOf(); // typeof +new Date()  "most likely" a unique number in Script Include Life Cycle
+
+/** 
+ * Please use GlideRecordSecure wherever possible because using GlideRecordSecure, system will enforce all ACLs and if you use GlideRecord then it won't check for user access control.
+ * @global {GlideRecord}
+ */
+var GlideRecordWihoutACL = x_230565_emsn['Glide' + 'Record'];
+
+SEUtil.MY_SCOPE_NAME = gs.getCurrentScopeName();
+SEUtil.userAttributeTableName = function () { return SEUtil.MY_SCOPE_NAME + '_userattribute'; };
+SEUtil.secureEntityTableName = function () { return SEUtil.MY_SCOPE_NAME + '_secureentity'; };
+
+/** The name prefix of Business Rule (sys_script.name) that are dynamically created */
+SEUtil.BIZ_NAME_PREFIX = 'EnforcerBefore';
+SEUtil.BIZ_Q_PREFIX = 'EnforcerBeforeQOn';
+SEUtil.BIZ_IU_PREFIX = 'EnforcerBeforeIUOn';
+SEUtil.OB_OWNER_ALWAYS_ALLOW = 'OwnerAlwaysAllow';
+SEUtil.OB_ALERT_MSG = 'AlertMsg';
+SEUtil.OB_APPLY_SECURITY_FILTER = 'ApplySecurityFilter';
+SEUtil.OB_ATTR_ALERT_MSG = 'Msg';
+
+SEUtil.format = function () {
+	var result = '';
+	var placeholderReg = /\{(\w+)\}/gi;
+	var args = Array.prototype.slice.call(arguments, 0);
+	var template = args[0];
+
+	if (typeof template === 'string') {
+		result = template.replace(placeholderReg, function (value, num) {
+			return args[Number(num) + 1];
+		});
+	}
+	return result;
+};
+
+SEUtil.isArray = ('isArray' in Array) ? Array.isArray : function (value) {
+	return Object.prototype.toString.call(value) === '[object Array]';
+};
+
+/**
+ * Parse an ISO-8601 date, including possible timezone, into a Javascript Date object.
+ * @param {string} dateString String value representing a date. The string should be in a format following IETF-compliant RFC 2822 timestamps and also a version of ISO8601.
+ * @return {Date} 
+ * @see https://stackoverflow.com/questions/439630/how-do-you-create-a-javascript-date-object-with-a-set-timezone-without-using-a-s
+ * @example // Test strings: parseISO8601String(x).toISOString()
+ * // "2013-01-31T12:34"              -> "2013-01-31T12:34:00.000Z"
+ * // "2013-01-31T12:34:56"           -> "2013-01-31T12:34:56.000Z"
+ * // "2013-01-31T12:34:56.78"        -> "2013-01-31T12:34:56.780Z"
+ * // "2013-01-31T12:34:56.78+0100"   -> "2013-01-31T11:34:56.780Z"
+ * // "2013-01-31T12:34:56.78+0530"   -> "2013-01-31T07:04:56.780Z"
+ * // "2013-01-31T12:34:56.78-0330"   -> "2013-01-31T16:04:56.780Z"
+ * // "2013-01-31T12:34:56-0330"      -> "2013-01-31T16:04:56.000Z"
+ * // "2013-01-31T12:34:56Z"          -> "2013-01-31T12:34:56.000Z"
+ */
+SEUtil.parseISO8601String = function (dateString) {
+    // US/Pacific America/Los_Angeles Asia/Shanghai
+    var timebits = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]*)(\.[0-9]*)?)?(?:([+-])([0-9]{2}):?([0-9]{2}))?/;
+    var m = timebits.exec(dateString);
+    var resultDate;
+    if (m) {
+        var utcdate = Date.UTC(parseInt(m[1], 10),
+            parseInt(m[2], 10) - 1, // months are zero-offset (!)
+            parseInt(m[3], 10),
+            parseInt(m[4], 10), parseInt(m[5], 10), // hh:mm
+            (m[6] && parseInt(m[6], 10) || 0),  // optional seconds
+            (m[7] && parseFloat(m[7]) * 1000) || 0); // optional fraction
+        // utcdate is milliseconds since the epoch
+        if (m[9] && m[10]) {
+            var offsetMinutes = parseInt(m[9], 10) * 60 + parseInt(m[10], 10);
+            utcdate += (m[8] === '+' ? -1 : +1) * offsetMinutes * 60000;
+        }
+        resultDate = new Date(utcdate);
+    } else {
+        resultDate = null;
+    }
+    return resultDate;
+};
+
+/**
+ * Query the `sys_ui_script` table and get a set of UI script information by the given names each prefixed with the scope name and a period if needed.
+ * Note the returned values are in the order specified by the input `names`.
+ * @param {string[]} names The UI script names
+ * @param {string} [scopeName='x_230565_emsn'] the name of the scope, by default, it's the current scope
+ * @return {string[]&{names:string[]}} an array of `sys_ui_script.sys_update_on` and contains a specific property `names`, an array of `sys_ui_script.name`.
+ * @see https://stackoverflow.com/questions/8996852/load-and-execute-order-of-scripts
+ * @example
+ */
+SEUtil.getUIScriptTimestamps = function (names, scopeName) {
+	if (!names || !names.length) {
+		SEUtil.warn('SEUtil.getUIScriptTimestamps', 'Empty names @ {0}', scopeName);
+		return [];
+	}
+	var uiScriptNames;
+	if (null == scopeName) {
+		scopeName = SEUtil.MY_SCOPE_NAME;
+	}
+	if (scopeName) {
+		uiScriptNames = [];
+		for (var key in names) {
+			uiScriptNames.push(scopeName + '.' + names[key]);
+		}
+		// SEUtil.debug('SEUtil.getUIScriptTimestamps', 'name IN {0}', uiScriptNames);
+	} else {
+		uiScriptNames = names; // or names.join() or uiScriptNames.toString()
+	}
+	try {
+		var uiScriptCreatedOns = {};
+		var gr = new GlideRecordWihoutACL('sys_ui_script');
+		gr.addQuery('name', 'IN', uiScriptNames);
+		// gr.setLimit(1);
+		// gr.setWorkflow(false); // Security restricted: Access to api 'setWorkflow' from scope 'x_230565_emsn' has been refused due to the api's cross-scope access policy
+		gr.query();
+		while (gr.next()) {
+			// gs.debug('SEUtil.getUIScriptTimestamps: ' + gr.name + '@' + gr.sys_id + ' was created on ' + gr.sys_created_on + 'and updated on ' + gr.sys_updated_on);
+			SEUtil.debug('SEUtil.getUIScriptTimestamps', '{0}@{1} was created on {2} and updated on {3}', gr.name, gr.sys_id, gr.sys_created_on, gr.sys_updated_on);
+			uiScriptCreatedOns[gr.getValue('name')] = gr.getValue('sys_updated_on');
+		}
+		// gs.info('SEUtil.getUIScriptTimestamps|RowCount={0}, getEncodedQuery: {1}', gr.get-RowCount(), gr.getEncodedQuery());
+
+	} catch (error) {
+		SEUtil.logThrow('SEUtil.getUIScriptTimestamps', error, SEUtil.toString(names));
+	}
+	//SEUtil.warn('SEUtil.getUIScriptTimestamps', 'Empty result for {0} @ {1}', names, scopeName);
+
+	var uiScriptItems = [];
+	for (var key in uiScriptNames) {
+		uiScriptItems.push(uiScriptCreatedOns[uiScriptNames[key]]);
+	}
+	uiScriptItems.names = uiScriptNames;
+	return uiScriptItems;
+};
+
+/**
+ * Retrieves the URL to automatically login the Web Console of Policy Configuration over REST HTTP RPC, while falling back to `alternative` if failed.
+ * @param {*} [alternative] a default value
+ * @return the auto-login URL without any user input or the default value `alternative` if failed.
+ */
+SEUtil.getConsoleTicketURLOverRestHttp = function (alternative) {
+	try {
+		var host = SEUtil.getProperty('Host');
+		var username = SEUtil.getProperty('UserName');
+		var password = SEUtil.getProperty('Password');
+		if (host && username && password) {
+			var sm = new sn_ws.RESTMessageV2();
+			var hosts = SEUtil.buildCCAndJPCHosts(host);
+			host = 'https://' + hosts.cc + '/console';
+			sm.setEndpoint('https://proxy.pep.cloudaz.com/cchelp/CCLoginHelp/GetAutoLoginUrl');
+			sm.setHttpMethod('POST');
+			sm.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+			sm.setRequestBody('consoleurl=' + encodeURIComponent(host) + '&username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password));
+			SEUtil.debug('getConsoleTicketURLOverRestHttp', sm.getRequestBody());
+			var response = sm.execute();
+			var responseBody;
+            // host is not valid               --> statusCode == 200 && body includes Exception:...
+			// username/password is not valid  --> statusCode == 500 && haveError == true			
+			if (response.haveError()) {
+				responseBody = response.getErrorMessage();
+				SEUtil.error('getConsoleTicketURLOverRestHttp', 'Response: {0} {1} for {2} at {3}', response.getStatusCode(), responseBody, username, host);			
+				alternative = "invalid username/password";
+			} else {
+				responseBody = response.getBody();
+				SEUtil.debug('getConsoleTicketURLOverRestHttp', 'Response: {0} {1} for {2} at {3}', response.getStatusCode(), responseBody, username, host);				
+				if (0 > responseBody.indexOf('Exception:'))  return responseBody;
+			}
+			return alternative;
+		}
+	} catch (error) {
+		SEUtil.logThrow('getConsoleTicketURLOverRestHttp', error);
+		return alternative;
+	}
+};
+
+/**
+ * * Web console's URL domian format is: Host0(e.g. NXLQATe404-)cc.cloudaz.com,
+ * * JPC URL domian format is: Host0(e.g. NXLQATe404-)jpc.cloudaz.com.
+ * 
+ * e.g. CloudAz REST API Token URL is NXLQATe404-jpc.cloudaz.com/cas/token,
+ * CloudAz REST API URL is NXLQATe404-jpc.cloudaz.com/dpc/authorization/pdp,
+ * Web console's URL is NXLQATe404-cc.cloudaz.com/console
+ * 
+ * @param {string} input The value user type in the Settings page, but it can be https://NXLQATe404-cc.cloudaz.com/console, NXLQATe404-cc.cloudaz.com
+ * @return {{cc: string, jpc: string}} e.g. `{ jpc: 'NXLQATe404-jpc.cloudaz.com' + host1e, cc: 'NXLQATe404-cc.cloudaz.com' }`
+ */
+SEUtil.buildCCAndJPCHosts = function (input) {
+    var iHostStart = input.indexOf('//');
+    iHostStart = 0 <= iHostStart ? iHostStart + 2 : 0;
+    var iPathSlash = input.indexOf('/', iHostStart);
+    if (0 > iPathSlash) iPathSlash = input.length;
+
+    // A domain name consists of one or more parts, technically called labels, that are conventionally concatenated, and delimited by dots, such as example.com.
+    var iHost0End = input.indexOf('.', iHostStart);
+    var host0, host1e; // debugger;
+    if (0 < iHost0End && iHost0End < iPathSlash - 1) {
+        host1e = input.substring(iHost0End + 1, iPathSlash);
+    } else {
+        // NXLQATe404-cc or NXLQATe404-cc\cloudaz.com, otherwise NXLQATe404-cc.
+        iHost0End = 0 > iHost0End || iHost0End >= iPathSlash ? iPathSlash : iPathSlash - 1;
+        host1e = 'cloudaz.com';
+    }
+    host0 = input.substring(iHostStart, iHost0End);
+
+    if (host0.endsWith('cc')) {
+        id = host0.slice(0, -2);
+    } else if (host0.endsWith('jpc')) {
+        id = host0.slice(0, -3);
+    } else {
+        id = host0;
+    }
+    return { jpc: id + 'jpc.' + host1e, cc: id + 'cc.' + host1e };
+};
+
+/**
+ * @param {string} hostpath e.g. httpbin.org/get, 93.184.216.34/test
+ * @param {number} [port] valid range value: 1 ~ 65535
+ * @param {boolean} [https] whether it is secured http address
+ * @return {string} e.g. https://httpbin.org/get http://93.184.216.34:8080/test
+ */
+SEUtil.buildHttpUrl = function (hostpath, port, https) {
+	var islash = hostpath.indexOf('/'), host, path;
+	if (0 <= islash) {
+		host = hostpath.substring(0, islash);
+		if (islash < hostpath.length)
+			path = hostpath.substring(islash);
+	} else {
+		host = hostpath;
+	}
+	// decide https or http, and prepare the port part for url
+	var url = 'http';
+	if (https) {
+		url += 's';
+		if (443 == port) port = '';
+	} else if (80 == port) port = '';
+
+	url += '://' + host;
+
+	if (port) {
+		url += ':' + port;
+	}
+
+	if (path) url += path;
+	return url;
+};
+
+/**
+ * Gets the value at `path` of `object`. If the resolved value is
+ * `undefined`, the `defaultValue` is returned in its place.
+ *
+ * @static
+ * @param {Object} object The object to query.
+ * @param {Array|string} path The path of the property to get.
+ * @param {*} [defaultValue] The value returned for `undefined` resolved values.
+ * @returns {*} Returns the resolved value.
+ * @example
+ * var object = { 'a': [{ 'b': { 'c': 3 } }] };  
+ * SEUtil.derefOpt(object, 'a[0].b.c'); // => 3  
+ * SEUtil.derefOpt(object, ['a', '0', 'b', 'c']); // => 3   
+ * _.derefOpt(object, 'a.b.c', 'default'); // => 'default'
+ */
+SEUtil.derefOpt = function (object, path, defaultValue) {
+	var result = object == null ? undefined : SEUtil.derefGet(object, path);
+	return result === undefined ? defaultValue : result;
+};
+
+/**
+* The base implementation of `_.get` without support for default values.
+*
+* @private
+* @param {Object} object The object to query.
+* @param {Array|string} path The path of the property to get.
+* @param {string} separator the separator of the path
+* @returns {*} Returns the resolved value.
+*/
+SEUtil.derefGet = function (object, path, separator) {
+	if (!SEUtil.isArray(path)) {
+		path = path.split(null != separator ? separator : '.');
+	}
+	//inspect the property path array against {object}
+	var index = 0, length = path.length;
+	while (object != null && index < length) {
+		object = object[path[index++]];
+	}
+	return (index && index == length) ? object : undefined;
+};
+
+// https://stackoverflow.com/questions/6393943/convert-javascript-string-in-dot-notation-into-an-object-reference#30360979
+// https://jsperf.com/dereference-object-property-path-from-string/4
+SEUtil.memoizedLookupFunction = function (obj, path, derefFuncs) {
+	if (!derefFuncs) {
+		derefFuncs = {};
+	}
+	if (!derefFuncs[path]) { /*jshint evil:true */
+		derefFuncs[path] = Function("obj", "return obj." + path + ";");
+	}
+	return derefFuncs[path](obj);
+};
+
+
+/**
+ * @param {string} hostpath e.g. httpbin.org/get, 93.184.216.34/test
+ * @param {number} port valid range value: 1 ~ 65535
+ * @param {boolean} https whether it is secured http address
+ * @return {string} e.g. https://httpbin.org/get http://93.184.216.34:8080/test
+ */
+SEUtil.buildHttpUrl = function (hostpath, port, https) {
+	var islash = hostpath.indexOf('/'), host, path;
+	if (0 <= islash) {
+		host = hostpath.substring(0, islash);
+		if (islash < hostpath.length)
+			path = hostpath.substring(islash);
+	} else {
+		host = hostpath;
+	}
+	// decide https or http, and prepare the port part for url
+	var url = 'http';
+	if (https) {
+		url += 's';
+		if (443 == port) port = '';
+	} else if (80 == port) port = '';
+
+	url += '://' + host;
+
+	if (port) {
+		url += ':' + port;
+	}
+
+	if (path) url += path;
+	return url;
+};
+
+/**
+ * Returns the string representation of the input argument.
+ * 
+ * Scoped GlideSystem.getUser() Returns a reference to the scoped GlideUser object for the current user.
+ * Scoped GlideUser.getName() Returns the user ID, or login name, of the current user.
+ * Scoped GlideSystem.getUserID() Gets the sys_id of the current user.
+ * Scoped GlideSystem.getUserName() Gets the user name, or user id, of the current user.
+ * 
+ * ```javascript
+ *  gs.debug(typeof (gs.getUser().getName()) + ', ' + gs.getUser().getName());
+ *  gs.debug(typeof (gs.getUserName()) + ', ' + gs.getUserName());
+ *  current.getValue('sys_created_by') === gs.getUserName()
+ * ```
+ * 
+ * In global: 
+ *  [0:00:00.028] Script completed in scope global: script
+ *  *** Script: [DEBUG] object, admin
+ *  *** Script: [DEBUG] string, admin
+ * 
+ *  [0:00:00.009] Script completed in scope x_123456_ourapp: script
+ *  x_123456_ourapp: string, admin (sys.scripts extended logging)
+ *  x_123456_ourapp: string, admin (sys.scripts extended logging)
+ *
+ * @param {Object} Obj an Object, javascript native object or java Object representation in javascript.
+ * @return {string} if the argument is `null`, then a string equal to ""; otherwise, the value of `Obj.toString()` is returned.
+ */
+SEUtil.toString = function (Obj) {
+	return null != Obj ? Obj.toString() : '';
+};
+
+
+/// Utility methods using ServiceNow API 
+
+SEUtil.PROP_PREFIX = SEUtil.MY_SCOPE_NAME; // 'com.nextlabs.se'; // g_form.setValue('name', 'com.nextlabs.se.xx')
+
+/**
+ * Retrieves the value (of string type) of a Glide property of our Enforcer Application. If the property is not found, returns an alternate value.
+ * 
+ * Note: All property values are stored as strings. When retrieving properties via the gs.getProperty() method, treat the results as strings. For example, 
+ * a true|false property returns 'true' or 'false' (strings), not the boolean equivalent.
+ * 
+ * @param {string} name The key for the property whose value should be returned.
+ * @param {*} [alt] (Optional) Alternate object to return if the property is not found (PS: or it's an empty string).
+ * @return {string} The value of the Glide property, or the alternate object defined above.
+ * @see {@link https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideSystemScoped/concept/c_GlideSystemScopedAPI.html#ariaid-title42|GlideSystem.getProperty}
+ * @see {@link https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/administer/reference-pages/task/t_AddAPropertyUsingSysPropsList.html|Add a system property # Field Value}
+ * @see SEUtil.getBoolProperty
+ */
+SEUtil.getProperty = function (name, alt) {
+	return gs.getProperty(SEUtil.PROP_PREFIX + '.' + name, alt);
+};
+
+/**
+ * Retrieves the boolean value of a Glide property of our Enforcer Application. If the property is not found, returns an alternate value `defval`.
+ * @param {string} name The key for the property whose value should be returned.
+ * @param {*} [defval] (Optional) Alternate object to return if the property is not found.
+ * @return {boolean}
+ * @see SEUtil.getProperty
+ */
+SEUtil.getBoolProperty = function (name, defval) {
+	var val = SEUtil.getProperty(name);
+	return null != val ? 'true' == val : defval;
+};
+
+/**
+ * Saves the specified key to the specified value if the property is within the script's scope, which here is our Enforcer application.
+ * 
+ * Note: Care should be taken when setting system properties (sys_properties) using this method as it causes a system-wide cache flush. Each
+ * flush can cause system degradation while the caches rebuild. If a value must be updated often, it should not be stored as a system property. 
+ * In general, you should only place values in the sys_properties table that do not frequently change.
+ * 
+ * @param {string} name The key for the property to be set.
+ * @param {string} value The value of the property to be set.
+ * @param {string} description A description of the property.
+ */
+SEUtil.setProperty = function (name, value, description) {
+	return gs.setProperty(SEUtil.PROP_PREFIX + '.' + name, value, description);
+};
+
+/**
+ * Save property. Sets the specified key to the specified value.
+ *
+ * Note: 
+ * * Care should be taken when setting system properties (sys_properties) using this method
+ *   as it causes a system-wide cache flush. Each flush can cause system degradation while the caches
+ *   rebuild. If a value must be updated often, it should not be stored as a system property. In general,
+ *   you should only place values in the sys_properties table that do not frequently change.
+ * * Save property for the class that extends `global.AbstractAjaxProcessor` of `Script Include` e.g. x_230565_emsn.PDPApi. 
+ *   If app scope represented by `gs.getCurrentApplicationId()` is different with the scope represented by `gs.getCurrentScopeName()`
+ *   , it won't be successfully saved for `gs.setProperty` but it's ok for `GlideRecord.update`.
+ * * For an integer (of type number), `gs.setProperty(name, 80);` leads to `80.0` is stored, you must use `gs.setProperty(name, (80).toString());`
+ *
+ * @param {string} name The key for the property to be set.
+ * @param {object} value The value of the property to be set, not null or undefined
+ * @param {string} description A description of the property.
+ * @return {string} unique id of new or updated record, but undefined if parameters are invalid.
+ * @see [Scoped GlideSystem - setProperty(String key, String value, String description)](https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideSystemScoped/concept/c_GlideSystemScopedAPI.html).
+ */
+SEUtil.saveProperty = function (name, value, description) {
+    if ('string' != typeof name || null == value) return;
+    // name = PDPApi.APP_SCOPE_NAME + '.' + name;
+    name = SEUtil.PROP_PREFIX + '.' + name;
+	// return gs.setProperty(name, value.toString(), description);
+	
+	// var prop = new GlideRecordSecure('sys_properties');
+	var prop = new GlideRecordWihoutACL('sys_properties');
+    
+    // prop.addQuery('name', PDPApi.APP_SCOPE_NAME + '.' + name);
+    // prop.query();
+    // if(prop.next()){
+    // 	prop.setValue('value', value.toString());
+    // 	return prop.update();
+    // }
+    
+    if (!prop.get('name', name)) {
+        prop.setValue('name', name);
+        // if ('number' == typeof value) {
+        //     prop.type = integer;
+        // }
+    }
+    // var oldval = prop.getValue('value');
+    prop.setValue('value', value.toString());
+    if (arguments.length > 2) prop.description = description; // undefined != desc
+    // Write operation against 'sys_properties' from scope 'x_159404_myapp' has been refused due to the table's cross-scope access policy
+    var uid = prop.update();
+	
+	// if(gs.nil(uid)){
+	//	gs.setProperty(name, value.toString(), description);
+	// }
+    return uid;
+};
+
+/**
+ * Retrieves the boolean value of a Glide property. If the property is not found, returns an alternate value `defval`.
+ * @param {string} name The key for the property whose value should be returned.
+ * @param {*} [defval] (Optional) Alternate object to return if the property is not found.
+ * @return {boolean}
+ */
+SEUtil.getBoolSysProperty = function (name, defval) {
+	var val = gs.getProperty(name);
+	return null != val ? 'true' == val : defval;
+};
+
+/** Returns pdpapi endpoint url */
+SEUtil.pcEndPoint = function () {
+	var pcHost = SEUtil.getProperty('PCHost');
+	var pcPort = SEUtil.getProperty('PCPort');
+	var pcHttps = SEUtil.getBoolProperty('PCHttps', false);
+	return SEUtil.buildHttpUrl(pcHost, pcPort, pcHttps);
+};
+
+/// END of Utility methods using ServiceNow API 
+
+/**
+ * Retrieves the object `GlideRecord` of the table on which the last field name is.
+ * @param {string} fieldName The filed name, it may be a dot-walked field names. e.g. caller_id.department.name
+ * @param {GlideRecord} current the base `GlideRecord`
+ * @return {GlideRecord} a `GlideRecord` object of the table on the field name resides.
+ * @example var current = new GlideRecordSecure('incident');
+ *  gr = getRefRecord('caller_id.department.name', current);
+ *  gs.debug('The table name of `caller_id.department.name`: ' + gr.getTableName());
+ *  gr = getRefRecord('approval', current);
+ *  gs.debug('The table name of `approval`: ' + gr.getTableName());
+ */
+SEUtil.getRefRecord = function (fieldName, current) {
+    var idxLastDot = fieldName.lastIndexOf('.');
+    if (0 > idxLastDot) {
+        return current;
+    } else {
+        var ge = current.getElement(fieldName.substr(0, idxLastDot));
+        // gs.debug(!!ge + ', ' + !ge + ', ' + ('' == ge));
+        if (null != ge) { // if the specific field name exists
+            return ge.getRefRecord();
+        }
+    }
+    return null;
+};
+
+/**
+ * build the script string for a business rule.
+ * Note that "Accessible from" of Script Include must be "All application scopes" not "This application scope only", 
+ *  that is, sys_script_include.access='public', not 'package_private'. Otherwise, 
+ * UI error message: Illegal access to private script include Enforcer in scope x_123456_ourApp being called from scope x_snc_anotherApp
+ * java.lang.SecurityException: Illegal access to private script include Enforcer in scope x_123456_ourApp being called from scope x_snc_anotherApp
+ *    Caused by error in sys_script.0123456789abcdef0123456789abcdef.script at line 1
+ * @param {string} funcName the functin name of `Enforcer.query` or `Enforcer.insertOrUpdate`
+ * @return {string} a script string.
+ */
+SEUtil.buildExecuteRuleScript = function (funcName) {
+	var apiNamePrefix = 'query' == funcName ? gs.getCurrentScopeName() + '.' : '';
+	return "(function executeRule(current, previous) {gs.info('ServiceNowEnforcer|" + funcName + "');"
+		+ apiNamePrefix + "Enforcer." + funcName + "(current, previous);})(current, previous);";
+};
+
+/// Commons Logging which is a simple logging facade for the underlying logging interface.
+
+// ## Verbosity
+// There are 4 levels of verbosity, in order from least verbose to most verbose, they are:
+// ```
+// error (gs.error)
+// warn (gs.warn)
+// info (gs.info)
+// debug (gs.debug)
+// ```
+// ...this means that setting log-level for a particular app to "info" will give you info+warn+error, but NOT debug.
+// ...Session debugging verbosity is debug, so any level of log verbosity will be included in Session debug output, for JUST the app being
+// debugged IN the session with session debugging activated.
+// The property for logging verbosity is (replacing with your app name):
+// ```
+// <APP_NAME>.logging.verbosity // off -> error -> warn -> info -> debug
+// ```
+//
+// ## Destination
+// Log destination of "db" will route log messages within desired logging verbosity to the table "syslog_app_scope", which extends syslog. 
+// This new table has added fields for the App/Scope issuing the log as well as a Source Script field that links to the script that called 
+// into the logging API (when we can figure it out, currently just for Business Rules and Script Includes). When Destination is set to "db",
+// logs will ALSO go to file system.
+// Log destination of "file" will log to the node's file system log without broadcasting to log listeners (except in the case of Scripts-Background)
+// The property for destination is:
+// ```
+// <APP_NAME>.logging.destination // none -> file -> db (implies file also)
+// ```
+//
+// PS: https://YOURINSTANCENAME.service-now.com/sys_properties_list.do?sysparm_query=nameLIKElogging
+
+SEUtil.log = function (lvl, tag, msg, arg) {
+	// TODO implement your code
+};
+
+/**
+ * Outputs a message using the specified function.
+ * @private
+ * @param {function} gslv such as `gs.debug`, `gs.info`
+ * @param {object[]} args [tag, msg]
+ * @param {string} args[0] tag message prefix of the first parameter of `gslv`
+ * @param {string} args[1] msg, it will be passed as the first parameter of `gslv`
+ */
+SEUtil.loglva = function (gslv, args) {
+	var fmt = '[' + args[0] + ']' + args[1];
+	Array.prototype.splice.call(args, 0, 2, fmt);
+	gslv.apply(gslv, args);
+};
+
+/**
+ * Outputs a debug level of message.
+ * @param {string} tag message prefix (Don't contain any substitution string, e.g. for log4j style: {0}, {1},...; c printf style: %s, %o, ...)
+ * @param {string} msg A JavaScript string containing zero or more substitution strings. 
+ * @param {...*} [args] JavaScript objects with which to replace substitution strings within `msg`. This gives you additional control over the format of the output.
+ * @example SEUtil.debug('tag', 'msg: {0}, {1}', [true, 'hasarg'].join(), JSON.stringify({arg: 2}));  
+ * SEUtil.debug('tag', 'msg: {0}, {1}}', [[true, 'hasarg'].join(), JSON.stringify({arg: 2})]);
+ */
+SEUtil.debug = function (tag, msg) { SEUtil.loglva(gs.debug, arguments); };
+
+/**
+ * Outputs a info level of message.
+ * @param {string} tag message prefix (Don't contain any substitution string, e.g. for log4j style: {0}, {1},...; c printf style: %s, %o, ...)
+ * @param {string} msg A JavaScript string containing zero or more substitution strings. 
+ * @param {...*} [args] JavaScript objects with which to replace substitution strings within `msg`. This gives you additional control over the format of the output.
+ * @example info('tag', 'msg: {0}, {1}', [true, 'hasarg'].join(), {arg: 2});  
+ * info('tag', 'msg: {0}, {1}', [[true, 'hasarg'].join(), {arg: 2}]);
+ */
+SEUtil.info = function (tag, msg) { SEUtil.loglva(gs.info, arguments); };
+
+/**
+ * Outputs a warn level of message.
+ * @param {string} tag message prefix (Don't contain any substitution string, e.g. for log4j style: {0}, {1},...; c printf style: %s, %o, ...)
+ * @param {string} msg A JavaScript string containing zero or more substitution strings. 
+ * @param {...*} [args] JavaScript objects with which to replace substitution strings within `msg`. This gives you additional control over the format of the output.
+ * @example SEUtil.warn('tag', 'msg: {0}, {1}', [true, 'hasarg'].join(), {arg: 2});  
+ * SEUtil.warn('tag', 'msg: {0}, {1}', [[true, 'hasarg'].join(), {arg: 2}]);
+ */
+SEUtil.warn = function (tag, msg) { SEUtil.loglva(gs.warn, arguments); };
+
+/**
+ * Outputs a error level of message.
+ * @param {string} tag message prefix (Don't contain any substitution string, e.g. for log4j style: {0}, {1},...; c printf style: %s, %o, ...)
+ * @param {string} msg A JavaScript string containing zero or more substitution strings. 
+ * @param {...*} [args] JavaScript objects with which to replace substitution strings within `msg`. This gives you additional control over the format of the output.
+ * @example SEUtil.error('tag', 'msg: {0}, {1}', [true, 'hasarg'].join(), {arg: 2});  
+ * SEUtil.error('tag', 'msg: {0}, {1}', [[true, 'hasarg'].join(), {arg: 2}]);
+ */
+SEUtil.error = function (tag, msg) { SEUtil.loglva(gs.error, arguments); };
+
+/**
+ * Outputs a error level of message with exception.
+ * @param {string} tag message prefix
+ * @param {string} err A JavaScript Exception or Java Exception (e.g. com.glide.communications.ProcessingException: Error executing REST request: null)
+ */
+SEUtil.logThrow = function (tag, err, msg) {
+	// var stack = err.stack || /*old opera*/ err.stacktrace || ( /*IE11*/ console.trace ? console.trace() : "no stack info");
+	var stack = err.stack || err.stacktrace || '<no stack info>';
+	var strException = err.toString(); // err.message
+	msg = null == msg ? 'InternalException: ' : msg + '\nInternalException: ';
+	gs.error('[' + tag + ']' + msg + strException + '\n' + stack);
+};
+
+/**
+ * Outputs a custom level (may be one of the four levels) of message ony for developer's test.
+ * @param {string} tag message prefix (Don't contain any substitution string, e.g. for log4j style: {0}, {1},...; c printf style: %s, %o, ...)
+ * @param {string} msg A JavaScript string containing zero or more substitution strings. 
+ * @param {...*} [args] JavaScript objects with which to replace substitution strings within `msg`. This gives you additional control over the format of the output.
+ * @example SEUtil.trace('tag', 'msg: {0}, {1}', [true, 'hasarg'].join(), {arg: 2});  
+ * SEUtil.trace('tag', 'msg: {0}, {1}', [[true, 'hasarg'].join(), {arg: 2}]);
+ */
+SEUtil.trace = function (tag, msg) {
+	var logtrace = SEUtil.LOG_TRACE;
+	if (undefined == logtrace) {
+		logtrace = gs.getProperty('com.nextlabs.se.trace', null);
+		switch (logtrace) {
+			case 'debug':
+			case 'info':
+			case 'warn':
+			case 'error':
+				logtrace = gs[logtrace];
+				SEUtil.LOG_TRACE = logtrace;
+				break;
+			default:
+				SEUtil.LOG_TRACE = null;
+				break;
+		}
+	}
+	if (logtrace) {
+		SEUtil.loglva(logtrace, arguments);
+	}
+};
+
+/*
+SEUtil.debug('tag', 'msg: {0}, {1}', [true, 'hasarg'].join(), JSON.stringify({arg: 2}));  
+SEUtil.debug('tag', 'msg: {0}, {1}}', [[true, 'hasarg'].join(), JSON.stringify({arg: 2})]);
+
+[0:00:00.009] Script completed in scope x_123456_app: script
+#### Compiler Stats ####
+Compiles: 1,700, time: 4,678ms
+Total classes: 1,703, bytecode length: 10,077,969
+Total loaders created: 1703, unloaded: 2, existing: 1701
+Interpreted compiles: 119, time: 47ms, total bytes: 149,672
+Cache name: "syscache_expression", max: 8,192, size: 1,819, seeks: 7,090,894, hits: 7,087,175, misses: 3,719, flushed: 0, puts: 0
+x_123456_app: tag|msg: true,hasarg, {"arg":2}} (sys.scripts extended logging)
+*/
+
+/**
+ * Print the elapsed time in format "measureExecutionTime|${SEUtil.onceID}|`${name}`'s execution time is ${elapsed} ms" for an interval
+ * based on the input start time and the optional stop time (by default, `new Date()`).
+ * @param {string} name the name for an interval measurement 
+ * @param {Date} start the start time to calculate the execution time
+ * @param {Date} [stop=new Date()] the end time to measure elapsed time for an interval
+ * @example var watchStart = new Date();
+// do something
+// var watchEnd = new Date();
+x_230565_emsn.SEUtil.logTime('name', watchStart);
+ */
+SEUtil.logTime = function (name, start, stop) {
+	start = start.getTime();
+	stop = stop instanceof Date ? stop.getTime() : new Date().getTime();
+	var message = 'measureExecutionTime|' + SEUtil.onceID + '|' + name + '\'s execution time is ' + (stop - start) + ' ms';
+
+	// https://docs.servicenow.com/bundle/london-platform-administration/page/administer/field-administration/task/t_SelectTheDisplayValue.html
+	// String GlideRecord.getClassDisplayValue() Returns the table's label.
+	// String GlideRecord.getDisplayValue() Retrieves the display value for the current record.
+	// String GlideRecord.getRecordClassName() Retrieves the class name for the current record.
+	if (null != current) {
+		message += ' when ' + current.operation() + ' ' + current.getClassDisplayValue() + '@' + current.sys_id + '(' + current.getDisplayValue() + ')';
+	}
+
+	gs.info(message);
+};
+
+/**
+ * @param {object} request entities table names that need to be activated 
+ * @param {object} response 
+ * @example // do in client script.
+ * var applications = {
+ *    global: ['incident', 'kb_knowledge', 'problem'], // Global
+ *    sn_appclient: ['sys_remote_app', 'sys_store_app'], // Scoped App Client
+ *    sn_kb_social_qa: ['kb_social_qa_answer', 'kb_social_qa_question'] // Social Knowledge
+ * };
+ * 
+ * if (entitiesNotExist.length) { enableBeforeQBusinessRulesByAJAX(entitiesNotExist, 'global'); }
+ */
+SEUtil.enableBusinessRules = function (entities) {
+	var Q_PREFIX = SEUtil.BIZ_Q_PREFIX, IU_PREFIX = SEUtil.BIZ_IU_PREFIX;
+	// 1/3 deactivate all our business rules which are in the entities that need to be activated 
+
+	// UPDATE Customers SET active = 0 WHERE active = 1 AND name LIKE 'prefix%';
+	var grBiz = new GlideRecordSecure('sys_script');
+
+	grBiz.addQuery('name', 'STARTSWITH', IU_PREFIX);
+
+	grBiz.addQuery('active', true); // addNullQuery.addOrCondition !=
+	grBiz.setValue('active', false);
+	var uidm = grBiz.updateMultiple();
+	gs.debug('uidm = ' + uidm);
+
+	// 2/3 query all our before-IU business rules, active them and remove them from entities, the remainings are entities need to create. 
+	var entitiesNotExist = enableBizRules(entities, IU_PREFIX);
+	// var appscope = gs.getCurrentScopeName();
+	for (var idx = 0, count = entitiesNotExist.length; idx < count; ++idx) {
+		var table = entitiesNotExist[idx];
+		var bizRule = new GlideRecordSecure('sys_script');
+		bizRule.initialize(); // Creates an empty record suitable for population before an insert.
+		bizRule.active = true;
+		bizRule.sys_application = 'global';
+		//bizRule.sys_updated_by='admin';
+		bizRule.sys_created_by = 'admin';
+		bizRule.sys_class_name = 'sys_script';
+
+		bizRule.name = IU_PREFIX + table;
+		bizRule.description = 'secure the enitiy ' + table + ' when insert or update';
+		bizRule.action_insert = true;
+		bizRule.action_update = true;
+		// bizRule.action_query = false;
+		bizRule.order = 100;
+		bizRule.when = 'before';
+		bizRule.collection = table;
+		bizRule.script = "(function executeRule(current, previous) {gs.info('ServiceNowEnforcer|insertOrUpdate'); Enforcer.insertOrUpdate(current, previous);})(current, previous);";
+
+		//Inserts a new record using the field values that have been set for the current record.
+		//Returns: string - unique id of the inserted record or null if record is not inserted.
+		var uid = bizRule.insert();
+	}
+
+	// 3/3 Activate before-Q business rules
+	entitiesNotExist = enableBizRules(entities, Q_PREFIX);
+
+	// TODO ajax response with entitiesNotExist, do in client script.
+	return entitiesNotExist;
+    /**
+     * @param {string[]} entities
+     * @param {string} scope the scope of those tables, they should be on the same scope
+     * @return names that don't exist in the database table Business Rule [sys_script] 
+     */
+	function enableBizRules(entities, bizNamePrefix) {
+		var grBiz = new GlideRecordSecure('sys_script'), prefixLen = bizNamePrefix.length;
+		grBiz.addQuery('name', 'STARTSWITH', bizNamePrefix);
+		grBiz.query();
+		entities = entities.slice(0); // clone (shallow copy) the contents of the original array
+		while (grBiz.next()) {
+			var bizName = grBiz.name.toString();
+			var entityName = bizName.substring(prefixLen);
+			var index = entities.indexOf(entityName);
+			if (index >= 0) {
+				entities.splice(index, 1);
+			}
+			//if(!grBiz.active)
+			grBiz.setValue('active', true);
+			var uid = grBiz.update();
+		}
+		return entities;
+	}
+};
+
+// jie 2018.09.25
+SEUtil.getEnforcerScript = getFuncStr;
+
+function getFuncStr() {
+	var ret = "";
+	var sysSecAcl = new GlideRecordSecure('sys_script_include');
+	sysSecAcl.addActiveQuery();
+	sysSecAcl.addQuery('name', 'CustomizeACLScript');
+	sysSecAcl.query();
+	var count = 0;
+	while (sysSecAcl.next()) {
+		ret = sysSecAcl.getValue('script');
+		break;
+	}
+	return ret;
+}]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-28 02:38:09</sys_created_on>
+        <sys_id>1aa32d404f724300b44b00f18110c7a8</sys_id>
+        <sys_mod_count>92</sys_mod_count>
+        <sys_name>SEUtil</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy>read</sys_policy>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_script_include_1aa32d404f724300b44b00f18110c7a8</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-04-19 03:31:03</sys_updated_on>
+    </sys_script_include>
+</record_update>

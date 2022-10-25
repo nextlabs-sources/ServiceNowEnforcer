@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update sys_domain="global" table="sys_app_application">
+    <sys_app_application action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <category display_value="Custom Applications">e0355b31ef303000a61d5a3615c0fb78</category>
+        <description>Nextlabs Entitlement Management Application</description>
+        <device_type>browser</device_type>
+        <hint>Nextlabs Entitlement Management Application</hint>
+        <name/>
+        <order>100</order>
+        <roles>x_230565_emsn.admin</roles>
+        <sys_class_name>sys_app_application</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-09-29 02:14:00</sys_created_on>
+        <sys_domain>global</sys_domain>
+        <sys_domain_path>/</sys_domain_path>
+        <sys_id>6922e8344f210300b44b00f18110c70a</sys_id>
+        <sys_mod_count>4</sys_mod_count>
+        <sys_name>Nextlabs Entitlement Management</sys_name>
+        <sys_overrides/>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_app_application_6922e8344f210300b44b00f18110c70a</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2018-09-03 10:12:02</sys_updated_on>
+        <title>Nextlabs Entitlement Management</title>
+        <view_name/>
+    </sys_app_application>
+</record_update>

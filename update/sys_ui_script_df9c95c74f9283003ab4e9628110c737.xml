@@ -1,0 +1,3896 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_ui_script">
+    <sys_ui_script action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <description/>
+        <global>false</global>
+        <name>x_230565_emsn.secure-entities</name>
+        <script><![CDATA[///<reference path="./typings/secure-entities.d.ts"/>
+///<reference path="./typings/util.d.ts" />
+///<reference path="./typings/sdk.d.ts" />
+
+//#region - joe's script
+; (function () {
+
+  var jslog = window.parent.jslog;
+  var APP_SCOPE_NAME = window.parent.MY_SCOPE_NAME;
+  var APP_SCOPE_SYS_ID = window.parent.MY_SCOPE_SYSID;
+  var TREEVIEW_ATTR_PREFIX = 'tree';
+  var TABLE_REF_PREFIX = 'ref';
+  var TREE_NODE_ID = 0;
+  var securedEntities;
+  var ALL_ENTITIES = '0'
+  var SECURE_ENTITIES = '1'
+  var INSECURE_ENTITIES = '2'
+
+  var util = nxl.util;
+  var sdk = nxl.sdk;
+  var $ = util.$;
+  var $$ = util.$$;
+  var _extend = util.extend;
+  var createDOM = util.createDOMFromString;
+  var fetchData = sdk.fetchRestFactory(util.format('/api/{0}', APP_SCOPE_NAME));
+  var fetchMetaData = sdk.fetchFactory('SysMeta');
+  var fetchPDPFunc = sdk.fetchFactory('PDPApi'); // fetchPDPFunc(resource, objMapData);
+
+  var insertAdjacentElementPositions = {
+    beforeCurrentElement: 'beforebegin',
+    beforeFirstChildOfCurrentElement: 'afterbegin',
+    afterLastChildOfCurrentElement: 'beforeend',
+    afterCurrentElement: 'afterend'
+  };
+
+  /**
+   * Computes the difference of arrays (note the comparison operators < and > are involved).
+   * @param {object[]} o Old Array, the sole source of the removed items
+   * @param {object[]} n New Array, the sole source of the added items
+   * @return {added: object[], removed: object[]} an object with two properties `added` and `removed`
+   * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Comparison_Operators#Relational_operators
+   * @example array_diff([0,1,2,3,4,5,6,7], [1,2,3,4,5,6,9]); // {added: [9], removed: [0, 7]}
+   *  array_diff(['kb_knowledge', 'problem', 'incident'], ['incident', 'alm_assert']); // {added: ['alm_assert'], removed: ['kb_knowledge', 'problem']}
+   */
+  function array_diff(o, n) {
+    // deal with empty lists
+    if (o == undefined) o = [];
+    if (n == undefined) n = [];
+
+    // sort both arrays (or this won't work)
+    o.sort(); n.sort();
+
+    // don't compare if either list is empty
+    if (o.length == 0 || n.length == 0) return { added: n, removed: o };
+
+    // declare temporary variables
+    var op = 0; var np = 0;
+    var a = []; var r = [];
+
+    // compare arrays and add to add or remove lists
+    while (op < o.length && np < n.length) {
+      if (o[op] < n[np]) {
+        // push to diff?
+        r.push(o[op]);
+        op++;
+      }
+      else if (o[op] > n[np]) {
+        // push to diff?
+        a.push(n[np]);
+        np++;
+      }
+      else {
+        op++; np++;
+      }
+    }
+
+    // add remaining items
+    if (np < n.length)
+      a = a.concat(n.slice(np, n.length));
+    if (op < o.length)
+      r = r.concat(o.slice(op, o.length));
+
+    return { added: a, removed: r };
+  }
+  //#region - sam's script for creating business rules dynamically.
+  (function (win) {
+
+    var MY_SCOPE_NAME = win.parent.MY_SCOPE_NAME;//getCurrentScopeName()//
+    var MY_SCOPE_SYSID = win.parent.MY_SCOPE_SYSID;//getCurrentScopeId()//
+    var BUSINESS_RULE_BEFORE_QUERY_PREFIX = win.parent.BIZ_Q_PREFIX;
+    var BUSINESS_RULE_BEFORE_INSERT_OR_UPDATE_PREFIX = win.parent.BIZ_IU_PREFIX;
+    var X_USER_TOKEN = win.parent['g'.toLowerCase() + '_ck']; // @Validation Eliminate the warning "Sensitive Data Exposure"
+    var util = window.nxl.util;
+    var sdk = window.nxl.sdk;
+    var GlideModal = win.parent.GlideModal;
+    var GlideDialogWindow = win.parent.GlideDialogWindow;
+    var dialogClass = win.parent.dialogClass;
+    var GwtMessage = win.parent.GwtMessage;
+
+    /**
+     * @param {SE.ViewModel.Entity[]} entities
+     * @return {Promise}
+     */
+    win.postBussinessRules = function (entities, oldEntityNames) {
+
+      var postBussinessData = sdk.fetchRestFactory('');
+      var resource = 'sys.scripts.do';
+
+      var data = {
+        script: '',
+        sysparm_ck: X_USER_TOKEN, // gs.getSessionToken();
+        runscript: 'Run script',
+        sys_scope: 'global',
+        quota_managed_transaction: 'on'
+      };
+
+      var options = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      };
+
+      var dataClearBusinessRules = util.extend({}, data);
+      var dataBeforeQueryBusinessRules = util.extend({}, data);
+      var dataBeforeInsertOrUpdateBusinessRules = util.extend({}, data);
+
+      var entityIds = [];
+      var enforcerName = util.format('{0}.Enforcer', MY_SCOPE_NAME);
+
+      if (Array.isArray(entities)) {
+        entityIds = entities.map(function (entity) {
+          return entity.id;
+        });
+      }
+
+      var differnce = array_diff(oldEntityNames, entityIds);
+
+      dataBeforeQueryBusinessRules.script = buildEvalStringForFunction(
+        ssCreateBeforeQBusinessRules,
+        differnce.added,
+        enforcerName,
+        BUSINESS_RULE_BEFORE_QUERY_PREFIX
+      );
+
+      dataBeforeInsertOrUpdateBusinessRules.script = buildEvalStringForFunction(
+        ssCreateBeforeIUBusinessRules,
+        differnce.added,
+        enforcerName,
+        BUSINESS_RULE_BEFORE_INSERT_OR_UPDATE_PREFIX
+      );
+
+      dataClearBusinessRules.script = buildEvalStringForFunction(
+        ssClearBusinessRules,
+        BUSINESS_RULE_BEFORE_QUERY_PREFIX,
+        BUSINESS_RULE_BEFORE_INSERT_OR_UPDATE_PREFIX,
+        differnce.removed
+      );
+
+      return (
+
+        //first request to clear old business rules
+        postBussinessData(resource, stringify(dataClearBusinessRules), options).then(function (payload) {
+
+          jslog(util.format('clearBusinessRules response: {0}', payload));
+
+          //second two requests to create before-insert-update & before-query business rules
+          var requests = [
+            postBussinessData(resource, stringify(dataBeforeInsertOrUpdateBusinessRules), options),
+            postBussinessData(resource, stringify(dataBeforeQueryBusinessRules), options)
+          ];
+
+          return Promise.all(requests).then(function (payloads) {
+            jslog(payloads);
+          });
+
+        }).catch(function (e) {
+          alert(e.message);
+          jslog(util.format('postBusinessRules failed, response: {0}', e));
+        })
+
+      );
+    };
+
+    win.postACLs = function (enforcedEntityNames, oldEntityNames) {
+      var postACLData = sdk.fetchRestFactory('');
+      var resource = 'sys.scripts.do';
+
+      var updateACLData = {
+        script: '',
+        sysparm_ck: X_USER_TOKEN, // gs.getSessionToken();
+        runscript: 'Run script',
+        sys_scope: 'global',
+        quota_managed_transaction: 'on'
+      };
+
+      var clearACLData = {
+        script: '',
+        sysparm_ck: X_USER_TOKEN, // gs.getSessionToken();
+        runscript: 'Run script',
+        sys_scope: 'global',
+        quota_managed_transaction: 'on'
+      };
+
+      var options = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      };
+
+      var differnce = array_diff(oldEntityNames, enforcedEntityNames);
+      var ajaxDataQueue = [];
+      if (differnce.removed.length) {
+        var strNames = differnce.removed.join(',');
+        //clearACLData.script = buildEvalStringForFunction(ssClearOurACLs, strNames);
+        jslog('postACLs|differnce.removed=' + strNames);
+        ajaxDataQueue.push(clearACLData);
+      }
+      //updateACLData.script = buildEvalStringForFunction(ssQueryUpdateACLs, differnce.added);
+      jslog('postACLs|differnce.added=' + differnce.added.join(','));
+      ajaxDataQueue.push(updateACLData);
+
+      return postACLData(resource, stringify(ajaxDataQueue.pop()), options)
+        .then(function (payload) {
+          jslog(util.format('response: {0}', payload));
+          if (ajaxDataQueue.length) {
+            return postACLData(resource, stringify(ajaxDataQueue.pop()), options);
+          }
+        })
+        .then(function (payload) {
+          jslog(util.format('response: {0}', payload));
+        })
+        .catch(function (err) {
+          jslog(util.format('failed, response: {0}', e.message));
+        });
+    }
+
+    /**
+     * Delete business rules whose field `collection` is entities or one of entities, all business rules of Enforcer.
+     * @param {string|string[]} [entities] a table name or an array of table names or a string separated with a comma (",").
+     */
+    function clearEnforcerBusinessRule(entities) {
+      gs.info('[clearEnforcerBusinessRule]gs.getCurrentApplicationId()={0}.', gs.getCurrentApplicationId());
+      var grBiz = new GlideRecord('sys_script');
+      grBiz.addActiveQuery();
+      grBiz.addQuery('name', 'STARTSWITH', 'EnforcerBefore');
+      grBiz.deleteMultiple();
+    }
+
+    function fetchData(url, method, headers, params, callback) {
+
+      if (!url || !method || !headers) {
+        jslog('fetchData failed, invalid params')
+        return
+      }
+
+      var xhr = new XMLHttpRequest()
+      xhr.onreadystatechange = function (e) {
+        if (xhr.readyState === 4) {
+
+          if (xhr.status === 200) {
+
+            if (callback) {
+              callback(xhr.responseText)
+            }
+
+          } else {
+            jslog(xhr.status.toString() + ': ' + xhr.statusText + ': ' + xhr.responseText)
+          }
+        }
+      }
+
+      xhr.open(method, url)
+      Object.keys(headers).forEach(function (key) {
+        xhr.setRequestHeader(key, headers[key])
+      })
+
+      try {
+        var OBJECT_TYPE = '[object Object]'
+        var ARRAY_TYPE = '[object Array]'
+        var paramType = Object.prototype.toString.call(params)
+        var body = (paramType === OBJECT_TYPE || paramType === ARRAY_TYPE) ? JSON.stringify(params) : params
+        xhr.send(body)
+      } catch (e) {
+        jslog(e)
+      }
+    }
+
+    /**
+     * stringify an object to formdata querystring format.
+     * - eg: { name: 'gengar', type: 'ghost' } will be transformed into name=gengar&type=ghost
+     * - all the value will be escaped to allow the transimission of the formdata.
+     * @param {Object} obj 
+     * @return {string}
+     */
+    function stringify(obj) {
+      return Object.keys(obj).reduce(function (prev, key) {
+        return prev + '&' + util.escapeFormData(key) + '=' + util.escapeFormData(obj[key]);
+      }, '').substring(1);
+    }
+    
+    /**
+     * Create before-Q business rules, which runs as server script. It MUST be the same scope to the one of application picker.
+     * @param {string[]} entities table names
+     * @param {string} apiName `gs.getCurrentApplicationId() + '.Enforcer'` e.g. 'x_[companyCode]_[shortAppId].Enforcer'
+     * @param {string} bizQPrefix it takes from `SEUtil.BIZ_Q_PREFIX`
+     * @example
+     * createBeforeIUBusinessRules([], MY_SCOPE_NAME + '.Enforcer', BIZ_IU_PREFIX);
+     *
+     * ajaxSysScript(buildEvalStringForFunction(ssCreateBeforeQBusinessRules, [''], (MY_SCOPE_NAME + '.Enforcer'), BIZ_IU_PREFIX));
+     */
+    function ssCreateBeforeQBusinessRules(entities, apiName, bizQPrefix) {
+      for (var idx = 0, cnt = entities.length; idx < cnt; ++idx) {
+        var tblName = entities[idx];
+        var bizRule = new GlideRecord('sys_script');
+        var uid;
+        bizRule.initialize();
+        bizRule.active = true;
+
+        var grTable = new GlideRecord('sys_db_object');
+        grTable.get('name', tblName);
+        bizRule.sys_scope = grTable.getValue('sys_scope'); // Eliminate Dot walking to sys_id (grTable.sys_scope.sys_id)
+
+        bizRule.sys_created_by = 'admin';
+        bizRule.sys_class_name = 'sys_script';
+        bizRule.name = bizQPrefix + tblName;
+        bizRule.description = 'secure the enitiy ' + tblName + ' when query';
+        bizRule.action_query = true;
+        bizRule.order = 100;
+        bizRule.when = 'before';
+        bizRule.collection = tblName;
+        bizRule.advanced = true;
+        bizRule.script = '/** This business rule is automatically generated by Enforcer. Do not modify it! */\n'
+          + '(function executeRule(current, previous) {\n'
+          + '\tgs.info("[' + bizRule.name + '::executeRule]");\n'
+          + '\tif(' + apiName + '.beforeReadBRJudge("' + tblName + '")){\n'
+          + '\t\t' + apiName + '.beforeRead(current, previous);\n'
+          + '\t}\n'
+          + '})(current, previous);';
+        uid = bizRule.insert();
+        gs.info('[createBeforeQBusinessRules]' + idx + '/' + cnt + ' create ' + tblName + ', return ' + uid);
+        // gs.info('[createBeforeQBusinessRules]{0}/{1} create {2}, return {3}', idx, cnt, tblName, uid);
+      }
+    }
+
+    /**
+     * Create before-IU business rules, which runs as server script
+     * @param {string[]} entities table names
+     * @param {string} apiName it is the result of `gs.getCurrentScopeName() + '.Enforcer'` e.g. 'x_[companyCode]_[shortAppId].Enforcer'
+     * @param {string} bizUIPrefix it takes from `SEUtil.BIZ_IU_PREFIX`
+     * @param {string} defaultScopeSysId it MUST be `null` to allow automatically populate `sys_script.sys_scope` and it is the value of `sys_scope.sys_id`
+     * @example 
+     * createBeforeIUBusinessRules([], MY_SCOPE_NAME + '.Enforcer', BIZ_IU_PREFIX);
+     * 
+     * ajaxSysScript(buildEvalStringForFunction(ssCreateBeforeIUBusinessRules, [''], (MY_SCOPE_NAME + '.Enforcer'), BIZ_IU_PREFIX));
+     */
+    function ssCreateBeforeIUBusinessRules(entities, apiName, bizUIPrefix, defaultScopeSysId) {
+      for (var idx = 0, cnt = entities.length; idx < cnt; ++idx) {
+        var tblName = entities[idx], scopeSysId;
+        var bizRule = new GlideRecord('sys_script'), uid;
+        bizRule.initialize();
+        bizRule.active = true;
+
+        if (!defaultScopeSysId) {
+          var grTable = new GlideRecord('sys_db_object');
+          grTable.get('name', tblName);
+          bizRule.sys_scope = grTable.getValue('sys_scope'); // Eliminate Dot walking to sys_id (grTable.sys_scope.sys_id)
+        } else {
+          bizRule.sys_scope = defaultScopeSysId;
+        }
+        bizRule.collection = tblName;
+
+        bizRule.sys_created_by = 'admin';
+        bizRule.sys_class_name = 'sys_script';
+        bizRule.name = bizUIPrefix + tblName;
+        bizRule.description = 'secure the enitiy ' + tblName + ' when query';
+        bizRule.action_insert = true;
+        bizRule.action_update = true;
+        bizRule.action_delete = true;
+        bizRule.action_query = false;
+        bizRule.order = 100;
+        bizRule.when = 'before';
+        bizRule.advanced = true;
+        //bizRule.script = '(function executeRule(current, previous) { gs.info("ServiceNowEnforcer|beforeWrite"); var bAbort = ' + apiName + '.beforeWrite(current, previous); current.setAbortAction(bAbort); })(current, previous);';
+        bizRule.script = '/** This business rule is automatically generated by Enforcer. Do not modify it! */\n'
+          + '(function executeRule(current, previous) {\n'
+          + '\tgs.info("[' + bizRule.name + '::executeRule]");\n'
+          + '\tvar bAbort = ' + apiName + '.beforeWrite(current, previous);\n'
+          + '\tcurrent.setAbortAction(bAbort);\n'
+          + '})(current, previous);';
+        uid = bizRule.insert();
+        gs.info('[createBeforeIUBusinessRules]' + idx + '/' + cnt + ' create ' + tblName + ', return ' + uid);
+        // gs.info('[createBeforeIUBusinessRules]{0}/{1} create {2}, return {3}', idx, cnt, tblName, uid);
+      }
+    }
+
+    /**
+     * Delete all specified business rules, which runs as server script on some application scope (e.g. global, x_snc_someapp)
+     * It seems that we don't have to change the current app set by the application picker (`gs.getCurrentApplicationId()`),
+     * and it aslo makes it even if there are business rules with different application scopes.
+     * @param {string} QPrfix The prefix of Before-Q Business Rule name
+     * @param {string} IUPrefix The prefix of Before-IU Business Rule name
+     * @param {string[]} names an array of entity names
+     */
+    function ssClearBusinessRules(QPrfix, IUPrefix, names) {
+      //   gs.debug(
+      //     "ssClearBusinessRules|" +
+      //       QPrfix +
+      //       " result: " +
+      //       clearBusinessRules(QPrfix)
+      //   );
+      //   gs.debug(
+      //     "ssClearBusinessRules|" +
+      //       IUPrefix +
+      //       " result: " +
+      //       clearBusinessRules(IUPrefix)
+      //   );
+
+      clearBusinessRules(QPrfix);
+      clearBusinessRules(IUPrefix);
+
+      function clearBusinessRules(bizNamePrefix) {
+        var grBiz = new GlideRecord('sys_script');
+        var unenforcedNames = names.map(function (n) { return (bizNamePrefix + n).slice(0, 40) }).join(',');
+
+        grBiz.addActiveQuery();
+        // grBiz.addQuery('name', 'STARTSWITH', bizNamePrefix);
+        grBiz.addQuery('name', 'IN', unenforcedNames);
+        return grBiz.deleteMultiple();
+      }
+    }
+
+  })(window);
+  //#endregion
+
+  //#region - the data
+
+  /**
+   * @type {SE.IStore}
+   * tables for data
+   * - all entity tables follow the format: { entityId: table }
+   * - all attribute tables follow the format: { compositeId: table }, compositeId format: 'entityId:attributeId'
+   * - table definitions can be found in typings/entity-store.d.ts
+   */
+  var store = {
+    entityAttrFetchStatus: {},
+    entityEnforcer: {},
+    entityInfo: {},
+    attrInfo: {},
+    refAttrInfo: {},
+    attrEnforcer: {},
+    refAttrEnforcer: {},
+    scopeInfo: {}
+  };
+
+  var pagerProto = {
+    setCurrentPageIndex: function (index) {
+      var maxPageIndex = Math.ceil(this.total / this.size);
+
+      if (index > maxPageIndex) {
+        index = maxPageIndex;
+      }
+
+      if (index < 1) {
+        index = 1;
+      }
+
+      this.current = index;
+
+      elements.pagerPrev.disabled = index === 1;
+      elements.pagerNext.disabled = index === maxPageIndex;
+    },
+    setStart: function (index) {
+      if (index < 1) {
+        index = 1;
+      }
+
+      // if (index === 1) {
+      //   elements.pagerPrev.disabled = true;
+      // } else {
+      //   elements.pagerPrev.disabled = false;
+      // }
+
+      this.start = index;
+    },
+    setEnd: function (index) {
+      // if (index % 10 !== 0) {
+      //   elements.pagerNext.disabled = true;
+      // } else {
+      //   elements.pagerNext.disabled = false;
+      // }
+
+      this.end = index;
+    }
+  };
+
+  var pagerPlain = {
+    current: 1,
+    start: 1,
+    end: 10,
+    size: 10,
+    total: 0,
+    scope: 'global',
+
+    setCurrentPageIndex: function (index) {
+      pagerProto.setCurrentPageIndex.call(this, index);
+    },
+    setStart: function (start) {
+      pagerProto.setStart.call(this, start);
+    },
+    setEnd: function (end) {
+      pagerProto.setEnd.call(this, end);
+    },
+    pagerHandler: function (e) {
+      var el = e.target;
+      var index = el && el.getAttribute('data-id');
+
+      index = Number(index);
+
+      if (!isNaN(index)) {
+
+        pagerPlain.setCurrentPageIndex(index);
+        setPagerClickState(pagerPlain.current);
+
+        fetchEntityList().then(function (entityIds) {
+          if (!Array.isArray(entityIds)) {
+            return;
+          }
+
+          var entities = [];
+
+          entities = entityIds.map(function (id) {
+            return service.getEntityById(id);
+          });
+
+          renderEntityList(entities);
+        });
+      }
+    }
+  };
+
+  var pagerSearch = {
+    current: 1,
+    start: 1,
+    end: 10,
+    size: 10,
+    total: 0,
+    keywords: '',
+    scope: 'global',
+    level: '0',
+	ecLabel: [],
+	targetTable: [],//["task", "planned_task", "asset", "rm_task", "cmdb_ci", "sm_order", "sm_task", "sys_user"],
+
+    setCurrentPageIndex: function (index) {
+      pagerProto.setCurrentPageIndex.call(this, index);
+    },
+    setStart: function (start) {
+      pagerProto.setStart.call(this, start);
+    },
+    setEnd: function (end) {
+      pagerProto.setEnd.call(this, end);
+    },
+    pagerHandler: function (e) {
+      var el = e.target;
+      var index = el && el.getAttribute('data-id');
+
+      index = Number(index);
+
+      if (!isNaN(index)) {
+
+        pagerSearch.setCurrentPageIndex(index);
+        setPagerClickState(pagerSearch.current);
+
+        fetchSearchList().then(function (entityIds) {
+          if (!Array.isArray(entityIds)) {
+            return;
+          }
+
+          var entities = [];
+
+          entities = entityIds.map(function (id) {
+            return service.getEntityById(id);
+          });
+
+          renderEntityList(entities);
+        });
+      }
+    }
+  };
+
+  /**
+   * point to the current pager that is used to request and render pager list.
+   * point to the pagerPlain default.
+   */
+  var curPager;
+
+  /**
+   * element caches used to locate element by id/compositeId
+   * - entityCheckboxes caches entity-card-checkbox elements in entity list
+   * - summary caches summary-entity-card elements in summary entity list
+   */
+  var elementMaps = {
+    entityCheckboxes: {},
+    summary: {}
+  };
+
+  var elements = {
+    scopeSelector: $('#scopeSelector'),
+    searchBox: $('#searchBox'),
+    searchBtn: $('#searchBtn'),
+    entityList: $('#entityList'),
+    summaryEntityListEl: $('#summaryEntityList'),
+    entityCounter: $('#entityCounter'),
+    pagerList: $('#pagerList'),
+    pagerPrev: $('#pagerPrev'),
+    pagerNext: $('#pagerNext'),
+    topSaveBtn: $('#topbarSaveBtn'),
+    topExportSaveBtn: $('#topbarExportAndSaveBtn'),
+    bottomSaveBtn: $('#bottomSaveBtn'),
+    bottomExportSaveBtn: $('#bottomExportSaveBtn'),
+    summarySaveBtn: $('#summarySaveBtn'),
+    summaryExportBtn: $('#summaryExportBtn'),
+    selectAllCheckbox: $('#selectAllCheckbox'),
+    fieldCancelBtn: $('#fieldSelectorCancelBtn'),
+    fieldConfirmBtn: $('#fieldSelectorConfirmBtn'),
+    showSelector: $('#showSelector'),
+    // uninstallBtn: $('#uninstallBtn'),
+	exportConfirmBtn: $('#export-confirm-btn'),	  
+	entitiesCategory: $('#entitiesCategory'),
+	entitiesCategory2: $('#entitiesCategory2'),
+	entitiesCategory3: $('#entitiesCategory3'),	  
+  };
+
+  //#endregion
+
+  //#region - services
+
+  var service = {
+    /**
+     * get scope from the table
+     * @param {string} id
+     * @return {NXL_Scope_Table}
+     */
+    getScopeById: function (id) {
+      if (id == null) {
+        return null;
+      }
+
+      return _extend({}, store.scopeInfo[id]);
+    },
+
+    /**
+     * get all scopes from the table
+     * @return {NXL_Scope_Table[]}
+     */
+    getAllScopes: function () {
+      return Object.keys(store.scopeInfo).map(function (scopeId) {
+        return service.getScopeById(scopeId);
+      });
+    },
+
+    /**
+     * get entity from store tables
+     * @param {string} id
+     * @return {SE.ViewModel.Entity}
+     */
+    getEntityById: function (id) {
+      if (id == null) {
+        return null;
+      }
+
+      return _extend({}, store.entityInfo[id], store.entityEnforcer[id]);
+    },
+
+    /**
+     * 
+     * @param {string} entityId 
+     * @return {SE.Tables.Enforcer}
+     */
+    getEntityEnforcementById: function (entityId) {
+      if (entityId == null) {
+        return null;
+      }
+
+      return _extend({}, store.entityEnforcer[entityId]);
+    },
+
+    /**
+     * get attribute from store tables
+     * @param {string} compositeId
+     * @return {SE.ViewModel.Attribute}
+     */
+    getAttributeByCompositeId: function (compositeId) {
+      if (compositeId == null || compositeId.split(':').length < 2) {
+        return null;
+      }
+
+      return _extend(
+        {},
+        store.attrInfo[compositeId],
+        store.attrEnforcer[compositeId]
+      );
+    },
+
+    getWillEnforcedAttributesByEntityId: function (entityId) {
+
+      var primitiveAttrs = service.getAttributesByEntityId(entityId).filter(function (attr) { return attr.willEnforced; });
+      var refAttrs = service.getEnforcedRefAttributesByEntityId(entityId);
+
+      return primitiveAttrs.concat(refAttrs);
+    },
+
+    /**
+     * get attributes of an entity from store tables
+     * @param {string} id
+     * @return {SE.ViewModel.Attribute[]}
+     */
+    getAttributesByEntityId: function (id) {
+      if (id == null) {
+        return [];
+      }
+
+      var compositeIds = Object.keys(store.attrInfo);
+
+      return compositeIds
+        .filter(function (compositeId) {
+          var entityId = compositeId.split(':')[0];
+          return entityId === id;
+        })
+        .map(function (compositeId) {
+          return _extend(
+            {},
+            store.attrInfo[compositeId],
+            store.attrEnforcer[compositeId]
+          );
+        });
+    },
+
+    /**
+     * get entities from table
+     * @return {NXL_Entity[]}
+     */
+    getAllEntities: function () {
+      return Object.keys(store.entityInfo).map(function (entityId) {
+        return service.getEntityById(entityId);
+      });
+    },
+
+    /**
+     * @return {SE.ViewModel.Entity[]}
+     */
+    getWillEnforcedEntities: function () {
+      return Object.keys(store.entityEnforcer)
+        .filter(function (entityId) {
+          return store.entityEnforcer[entityId].willEnforced;
+        })
+        .map(function (entityId) {
+          return _extend(
+            {},
+            store.entityEnforcer[entityId],
+            store.entityInfo[entityId]
+          );
+        });
+    },
+
+    /**
+     * @return {SE.ViewModel.Entity[]}
+     */
+
+    getWillUnEnforcedEntities: function () {
+      return Object.keys(store.entityEnforcer)
+        .filter(function (entityId) {
+          return (
+            !store.entityEnforcer[entityId].willEnforced &&
+            store.entityEnforcer[entityId].enforced
+          );
+        })
+        .map(function (entityId) {
+          return _extend(
+            {},
+            store.entityEnforcer[entityId],
+            store.entityInfo[entityId]
+          );
+        });
+    },
+
+    /**
+     * @return {SE.ViewModel.Entity[]}
+     */
+    getEnforcedEntities: function () {
+      return Object.keys(store.entityEnforcer)
+        .filter(function (entityId) {
+          return store.entityEnforcer[entityId].enforced;
+        })
+        .map(function (entityId) {
+          return _extend(
+            {},
+            store.entityEnforcer[entityId],
+            store.entityInfo[entityId]
+          );
+        });
+    },
+
+    /**
+     * @return {SE.ViewModel.Entity[]}
+     */
+    getUnEnforcedEntities: function () {
+      return Object.keys(store.entityEnforcer)
+        .filter(function (entityId) {
+          return !store.entityEnforcer[entityId].willEnforced;
+        })
+        .map(function (entityId) {
+          return _extend(
+            {},
+            store.entityEnforcer[entityId],
+            store.entityInfo[entityId]
+          );
+        });
+    },
+
+    /**
+     * @param {string} entityId
+     * @return {SE.Tables.FetchStatus}
+     */
+    getEntityAttrFetchStatus: function (entityId) {
+      return _extend({}, store.entityAttrFetchStatus[entityId]);
+    },
+
+    /**
+     * @param {string} compositeId
+     * @return {SE.ViewModel.Attribute}
+     */
+    getEnforcedRefAttributeByCompositeId: function (compositeId) {
+      if (compositeId == null) {
+        return null;
+      }
+
+      var enforcer = store.refAttrEnforcer[compositeId]
+      var isEnforced = (enforcer && enforcer.enforced)
+      var willEnforced = (enforcer && enforcer.willEnforced)
+
+      if (willEnforced) {
+        return _extend({}, store.refAttrInfo[compositeId], { enforced: isEnforced, willEnforced: willEnforced });
+      } else {
+        return null
+      }
+    },
+
+    /**
+     * @param {string} entityId
+     * @return {SE.ViewModel.Attribute[]}
+     */
+    getAllRefAttributesByCompositeId: function (id) {
+
+      if (id == null) {
+        return [];
+      }
+
+      var compositeIds = Object.keys(store.refAttrInfo);
+
+      return compositeIds.filter(function (compositeId) {
+        var entityAttrId = compositeId.split('.')[0];
+        return entityAttrId === id;
+      }).map(function (compositeId) {
+
+        var enforced = (store.refAttrEnforcer[compositeId] && !!store.refAttrEnforcer[compositeId].enforced)
+        var willEnforced = (store.refAttrEnforcer[compositeId] && !!store.refAttrEnforcer[compositeId].willEnforced)
+
+        return _extend({}, store.refAttrInfo[compositeId], { enforced: enforced, willEnforced: willEnforced });
+      });
+    },
+
+    /**
+     * @param {string} entityId
+     * @return {SE.ViewModel.Attribute[]}
+     */
+    getEnforcedRefAttributesByCompositeId: function (id) {
+
+      if (id == null) {
+        return [];
+      }
+
+      var compositeIds = Object.keys(store.refAttrInfo);
+
+      return compositeIds.filter(function (compositeId) {
+        var entityAttrId = compositeId.split('.')[0];
+        return entityAttrId === id && !!store.refAttrEnforcer[compositeId].willEnforced;
+      }).map(function (compositeId) {
+        return _extend({}, store.refAttrInfo[compositeId], { enforced: !!store.refAttrEnforcer[compositeId].enforced, willEnforced: !!store.refAttrEnforcer[compositeId].willEnforced });
+      });
+    },
+
+    /**
+     * @param {string} entityId
+     * @return {SE.ViewModel.Attribute[]}
+     */
+    getEnforcedRefAttributesByEntityId: function (entityId) {
+
+      if (entityId == null) {
+        return [];
+      }
+
+      var compositeIds = Object.keys(store.refAttrInfo);
+
+      return compositeIds.filter(function (compositeId) {
+        var id = compositeId.split(':')[0];
+        return entityId === id && !!store.refAttrEnforcer[compositeId].willEnforced;
+      }).map(function (compositeId) {
+        return _extend({}, store.refAttrInfo[compositeId], { enforced: !!store.refAttrEnforcer[compositeId].enforced, willEnforced: !!store.refAttrEnforcer[compositeId].willEnforced });
+      });
+    },
+
+    /**
+     * @param {string} refAttrId
+     * @return {SE.ViewModel.Attribute[]}
+     */
+    getEnforcedRefAttributesByRefAttributeId: function (refAttrId) {
+
+      if (refAttrId == null) {
+        return null;
+      }
+
+      var compositeIds = Object.keys(store.refAttrInfo);
+
+      return compositeIds.filter(function (compositeId) {
+
+        var curAttrId = compositeId.split(':')[1];
+        var curRefAttrId = curAttrId ? curAttrId.split('.')[0] : '';
+
+        return refAttrId === curRefAttrId;
+
+      }).map(function (compositeId) {
+        return _extend({}, store.refAttrInfo[compositeId], { enforced: true, willEnforced: true });
+      });
+
+    },
+
+    /**
+     * set entity enforcement by id
+     * @param {string} entityId
+     * @param {boolean} enforce
+     */
+    setEntityEnforcement: function (entityId, enforce) {
+      var entityEnforcer = store.entityEnforcer[entityId];
+
+      if (entityEnforcer) {
+        entityEnforcer.willEnforced = !!enforce;
+      } else {
+
+        entityEnforcerHydrator(entityId, !!enforce);
+        // jslog(
+        //   util.format('setEntityEnforcement failed, entity of {0} not found.')
+        // );
+      }
+    },
+
+    /**
+     * set attribute enforcement by compositeId
+     * @param {string} compositeId
+     * @param {boolean} enforce
+     */
+    setAttributeEnforcement: function (compositeId, enforce) {
+      var attrEnforcer = store.attrEnforcer[compositeId];
+
+      if (attrEnforcer) {
+        attrEnforcer.willEnforced = !!enforce;
+      }
+      else {
+        attrEnforcerHydrator(compositeId, !!enforce);
+        // jslog(
+        //   util.format(
+        //     "setAttributeEnforcement failed. attrEnforcer of {0} not found.",
+        //     compositeId
+        //   )
+        // );
+      }
+    },
+
+    /**
+     * @param {string} compositeId
+     * @param {boolean} enforce
+     */
+    setRefAttributeEnforcement: function (compositeId, enforce) {
+
+      var refAttrEnforcer = store.refAttrEnforcer[compositeId];
+
+      if (refAttrEnforcer) {
+        refAttrEnforcer.willEnforced = enforce;
+      }
+      else {
+        refAttrEnforcerHydrator(compositeId, enforce);
+      }
+    },
+
+    /**
+     * @param {string} id
+     * @param {boolean} enforce
+     */
+    setBatchRefAttributeEnforcementById: function (id, enforce) {
+
+      if (id == null) {
+        jslog(util.format('setBatchRefAttributeEnforcementById failed, compositeId: {0}', id));
+        return;
+      }
+
+      var compositeIds = Object.keys(store.refAttrEnforcer);
+
+      compositeIds.filter(function (compositeId) {
+        var entityAttrId = compositeId.split('.')[0];
+        return entityAttrId === id;
+      }).forEach(function (compositeId) {
+
+        var enfocer = store.refAttrEnforcer[compositeId];
+
+        if (enforce) {
+          enforce.willEnforced = enforce;
+        }
+        else {
+          refAttrEnforcerHydrator(compositeId, enforce);
+        }
+      });
+    },
+
+    setEntityAttrFetchStatus: function (entityId, isFetched) {
+
+      var fetchStatus = store.entityAttrFetchStatus[entityId];
+
+      if (fetchStatus) {
+        fetchStatus.isFetched = isFetched;
+      }
+      else {
+        entityAttrFetchStatusHydrator(entityId, isFetched);
+        //jslog(util.format('setEntityAttrFetchStatus failed, status not found, entityId: {0}', entityId));
+      }
+    }
+  };
+
+  //endregion
+
+  //#region - components
+  var uploader = {
+    el: $('#overlay'),
+    bar: $('#progressBar'),
+	secureNextStep: $('#secureNextStep'),
+	secureEntitiesResult: $('#secureEntitiesResult'),
+    current: 1,
+    total: 0,
+    show: function () {
+      this.el.classList.remove('hide');
+    },
+    hide: function () {
+      this.el.classList.add('hide');
+    },
+	secureNextStepHide: function () {
+      this.secureNextStep.classList.add('hide');
+    },
+	  secureEntitiesResultShow: function () {
+      this.secureEntitiesResult.classList.remove('hide');
+    },
+    setCurrentEntityName: function (name) {
+      var nameEl = $('#currentEntityName');
+
+      if (nameEl) {
+        nameEl.textContent = name;
+      } else {
+        jslog(
+          'uploader -> setCurrentEntityName failed. element currentEntityName not found.'
+        );
+      }
+    },
+    setCurrentIndex: function (index) {
+      var curIndexEl = $('#currentIndex');
+
+      if (curIndexEl) {
+        uploader.current = index;
+        curIndexEl.textContent = index;
+        uploader.bar.style.width = util.format(
+          '{0}%',
+          uploader.current / uploader.total * 100
+        );
+      } else {
+        jslog(
+          'uploadModal -> setCurrentIndex failed. element currentIndex not found.'
+        );
+      }
+    },
+    setTotal: function (total) {
+      var totalEl = $('#totalCount');
+      if (totalEl) {
+        uploader.total = total;
+        totalEl.textContent = total;
+      } else {
+        jslog(
+          'uploadModal -> setCurrentIndex failed. element totalCount not found.'
+        );
+      }
+    }
+  };
+
+  var treeviewSelector = {
+    el: $('#fieldSelectorModal'),
+    wrap: $('#treevieweWrap'),
+    show: function () {
+      this.el.classList.remove('hide');
+    },
+    hide: function () {
+      this.el.classList.add('hide');
+    },
+    clear: function () {
+      this.wrap.textContent = '';
+    }
+  };
+  //#endregion
+
+  //#region - entry point
+  ; (function init() {
+    initUI();
+    initListeners();
+  })();
+
+  function initListeners() {
+    elements.pagerList.onclick = curPager.pagerHandler.bind(curPager);
+    elements.scopeSelector.onchange = scopeSelectHandler.bind(this);
+    elements.searchBtn.onclick = searchHandler.bind(this);
+    elements.pagerPrev.onclick = pagerPrevHandler.bind(this);
+    elements.pagerNext.onclick = pagerNextHandler.bind(this);
+    elements.topSaveBtn.onclick = saveHandler.bind(this);
+    elements.bottomSaveBtn.onclick = saveHandler.bind(this);
+    elements.summarySaveBtn.onclick = saveHandler.bind(this);
+    elements.selectAllCheckbox.onclick = selectAllEntitiesHandler.bind(this);
+    elements.fieldConfirmBtn.onclick = fieldSelectorConfirmHandler.bind(this);
+    elements.fieldCancelBtn.onclick = treeviewSelector.hide.bind(treeviewSelector);
+    elements.topExportSaveBtn.onclick = exportAndSaveHandler.bind(this);
+    elements.bottomExportSaveBtn.onclick = exportAndSaveHandler.bind(this);
+    elements.summaryExportBtn.onclick = exportAndSaveHandler.bind(this);
+    // elements.uninstallBtn.onclick = window.ajaxUninstallSysScript.bind(this);
+    //elements.showSelector.onchange = showDropdownHandler.bind(this);
+	elements.exportConfirmBtn.onclick = closeDialogHandler.bind(this);
+	elements.entitiesCategory.onchange = showEntitiesCategory2.bind(this);
+	elements.entitiesCategory2.onchange = showEntitiesCategory3.bind(this);
+	  
+    elements.searchBox.addEventListener('keyup', function (e) {
+
+      var key = e.key;
+
+      if (key === 'Enter') {
+        searchHandler(e);
+      }
+
+    }, false);
+  }
+
+  function initUI() {
+    curPager = pagerPlain;
+
+    fetchScopeList().then(function () {
+      var scopes = service.getAllScopes();
+      renderScopeSelector(scopes);
+    });
+
+    fetchEntityList().then(function (entityIds) {
+      if (!Array.isArray(entityIds)) {
+        return;
+      }
+
+      var maxPageIndex = Math.ceil(curPager.total / curPager.size);
+      var pageSize = maxPageIndex > curPager.size ? curPager.size : maxPageIndex;
+
+      curPager.setStart(1);
+      curPager.setEnd(pageSize);
+      curPager.setCurrentPageIndex(1);
+
+      fetchEnforcedInfos().then(function () {
+        clearSummaryEntityList();
+        setEntityCount();
+
+        var entities = [];
+
+        entities = entityIds.map(function (id) {
+          return service.getEntityById(id);
+        }).sort(function (a, b) { return alphabeticalSorter(a.displayName, b.displayName, true) });
+
+        renderEntityList(entities);
+        renderPagerList();
+        renderSummaryEntityList();
+      });
+    });
+  }
+
+  //#endregion
+
+  //#region - promisify request
+
+  function fetchEntityList() {
+    var resource = 'security_entities';
+    var data = {
+      status: true,
+      func_name: 'GetPaginationInfo',
+      func_arguments: {
+        page_index: pagerPlain.current,
+        page_size: pagerPlain.size,
+        scope_name: pagerPlain.scope
+      }
+    };
+    var options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8'
+      }
+    };
+
+    return new Promise(function (resolve, reject) {
+      fetchData(resource, JSON.stringify(data), options).then(function (payload) {
+
+        var result = JSON.parse(payload).result;
+
+        if (result && !result.error) {
+
+          /**
+           * @type {SE.APIModel.NxlMetaEntity[]}
+           */
+          var models = result.records;
+          pagerPlain.total = result.page_count;
+
+          if (Array.isArray(models)) {
+
+            var entityIds = [];
+
+            models.forEach(function (model) {
+
+              var id = model.internal_name;
+              var enforcer = service.getEntityEnforcementById(id);
+              var attrFetchStatus = service.getEntityAttrFetchStatus(id);
+
+              entityIds.push(id);
+              nxlMetaEntityHydrator(model);
+              entityEnforcerHydrator(model.internal_name, !!enforcer.willEnforced);
+              entityAttrFetchStatusHydrator(model.internal_name, !!attrFetchStatus.isFetched);
+            });
+
+            resolve(entityIds);
+          }
+          else {
+            throw new Error(util.format('fetchEntity failed, records: {0}', models));
+          }
+        }
+        else {
+          throw new Error(util.format('fetchEntity failed, {0}', payload));
+        }
+      }).catch(function (e) {
+        jslog(e);
+      });
+    });
+  }
+
+  function fetchSearchList() {
+    var resource = 'security_entities';
+    var data = {
+      status: true,
+      func_name: 'SearchEntityInfo',
+      func_arguments: {
+        entity_label: pagerSearch.keywords,
+        page_index: pagerSearch.current,
+        page_size: pagerSearch.size,
+        scope_name: pagerSearch.scope,
+        enforcedIds: service.getWillEnforcedEntities().map(function (entity) { return entity.name }) || [],
+        secure_level: pagerSearch.level,
+		entity_classification: pagerSearch.ecLabel,
+		targetTable: pagerSearch.targetTable
+      }
+    };
+    var options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8'
+      }
+    };
+ 
+    return new Promise(function (resolve, reject) {
+      fetchData(resource, JSON.stringify(data), options).then(function (payload) {
+        var result = JSON.parse(payload).result;
+
+        if (result && !result.error) {
+          var models = result.records;
+          pagerSearch.total = result.total_search_count;
+          jslog(util.format('fetchSearchList , count:{0}', result.total_search_count));
+          if (Array.isArray(models)) {
+            var entityIds = [];
+
+            models.forEach(function (model) {
+
+              var id = model.internal_name;
+
+              entityIds.push(id);
+              nxlMetaEntityHydrator(model);
+			  //jslog(util.format('fetchSearchList, internal_name:{0}, model.willBeEnforced:{1}', model.internal_name, model.willBeEnforced));
+			  
+			  if (model.willBeEnforced) {
+				service.setEntityEnforcement(id, model.willBeEnforced);  
+				removeEntityFromSummary(id);
+                addEntityToSummary(id);
+			  }			  			  
+              //entityEnforcerHydrator(model.internal_name, false);
+              //entityAttrFetchStatusHydrator(model.internal_name, false);
+            });
+
+            resolve(entityIds);
+          }
+          else {
+            throw new Error(util.format('fetchSearchList failed, records: {0}', models));
+          }
+        }
+        else {
+          throw new Error(util.format('fetchSearchList failed, {0}', payload));
+        }
+      }).catch(function (e) {
+        jslog(e);
+      });
+    });
+  }
+
+  function fetchNxlMetaEntity(entityId) {
+
+    var resource = 'security_entities';
+    var data = {
+      status: true,
+      func_name: 'GetEntityMetadata',
+      func_arguments: {
+        name: entityId
+      }
+    };
+    var options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8'
+      }
+    };
+
+    return new Promise(function (resolve, reject) {
+      fetchData(resource, JSON.stringify(data), options).then(function (payload) {
+
+        var model = JSON.parse(payload).result.record;
+
+        if (model) {
+          nxlMetaEntityHydrator(model);
+          resolve(entityId);
+        }
+
+      }).catch(function (e) {
+        jslog(e);
+      });
+    });
+  }
+
+  /**
+   * @deprecated
+   * @param {string} entityId
+   * @return {Promise}
+   */
+  function fetchAttribute(entityId) {
+    var resource = 'security_entities';
+    var data = {
+      status: true,
+      func_name: 'GetEntityInfo',
+      func_arguments: { internal_name: entityId }
+    };
+    var options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8'
+      }
+    };
+
+    return fetchData(resource, JSON.stringify(data), options).then(function (payload) {
+      var result = JSON.parse(payload).result;
+
+      if (result && !result.error) {
+        var models = result.entity_columns;
+
+        if (Array.isArray(models)) {
+          models.forEach(function (model) {
+            var modelWithEntityId = _extend({}, model, {
+              entity_name: result.entity_name
+            });
+            attributeMetaHydrator(modelWithEntityId);
+          });
+        }
+        else {
+          throw new Error(util.format('fetchEntity failed, records: {0}', models));
+        }
+      }
+      else {
+        throw new Error(util.format('fetchEntity failed, {0}', payload));
+      }
+    })
+      .catch(function (e) {
+        jslog(e);
+      });
+  }
+
+  function fetchMetaAttribute(entityId) {
+
+    var data = {
+      'scope': APP_SCOPE_NAME,
+      'method': 'getTreeNodes',
+      'type': 'column',
+      'value': entityId
+    };
+
+    return fetchMetaData('', data, false).then(function (payload) {
+
+      /**
+       * @type {SE.APIModel.SNMetaAttriute[]}
+       */
+      var attrs = payload.xml.item;
+
+      if (Array.isArray(attrs)) {
+
+        entityAttrFetchStatusHydrator(entityId, true);
+
+        attrs.forEach(function (attr) {
+          snMetaAttributeHydrator(attr, entityId);
+        });
+      }
+      else {
+        jslog(util.format('fetchMetaAttribute failed, response attributes invalid: response: {0}', JSON.stringify(payload)))
+      }
+    });
+  }
+
+  function fetchEnforcedInfos() {
+    var resource = 'security_entities';
+    var data = {
+      status: true,
+      func_name: 'GetEnforceEntity'
+    };
+    var options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8'
+      }
+    };
+
+    return fetchData(resource, JSON.stringify(data), options).then(function (payload) {
+      securedEntities = [];
+
+      if (payload) {
+
+        var result = JSON.parse(payload).result;
+
+        /**
+         * @type {SE.APIModel.NxlEnforcedEntity[]}
+         */
+        var models = (result && result['enforce_entity']) || [];
+
+        if (models.length > 0) {
+
+          models.forEach(function (model) {
+
+            nxlEnforcedEntityHydrator(model);
+            entityEnforcerHydrator(model.internal_name, true);
+            securedEntities.push(model.internal_name);
+
+            model.attributes.forEach(function (attr) {
+
+              var compositeId = util.format('{0}:{1}', model.internal_name, attr.column_name);
+
+              if (attr.is_reference) {
+                refAttributeHydrator(attr, model.internal_name);
+                refAttrEnforcerHydrator(compositeId, true);
+              }
+              else {
+                nxlEnforcedAttributeHydrator(attr, model.internal_name)
+                attrEnforcerHydrator(compositeId, true);
+              }
+            });
+
+          });
+        }
+        else {
+          jslog(util.format('no enforced entities retrieved, response: {0}', payload));
+        }
+      }
+    }).catch(function (e) {
+      //alert(e.message);
+      jslog(e);
+    });
+  }
+
+  function fetchScopeList() {
+    var resource = 'security_entities';
+    var data = {
+      status: true,
+      func_name: 'GetScopeName'
+    };
+    var options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8'
+      }
+    };
+
+    return fetchData(resource, JSON.stringify(data), options).then(function (payload) {
+      var result = JSON.parse(payload).result;
+
+      if (result) {
+        var models = result;
+        if (Array.isArray(models)) {
+          models.forEach(function (model) {
+            scopeHydrator(model);
+          });
+        }
+      }
+      else {
+        throw new Error(util.format('fetchScopeList failed, {0}', payload));
+      }
+    }).catch(function (e) {
+      jslog(e);
+    });
+  }
+
+  /**
+   * 
+   * @param {SE.ViewModel.Entity[]} entities 
+   * @return {Promise}
+   */
+  function postEntities(entities, deselectedEntities) {
+
+    var resource = 'security_entities';
+    var data = {
+      status: true,
+      func_name: 'UpdateEntityInfo',
+      func_arguments: {
+        active_entity_attributes: [],
+        deselectedEntities: deselectedEntities
+      }
+    };
+    var options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8'
+      }
+    };
+
+    data.func_arguments.active_entity_attributes = entities.filter(function (entity) {
+      return entity.willEnforced;
+    }).map(function (entity) {
+
+      var primitiveAttrs = service.getAttributesByEntityId(entity.id);
+      var refAttrs = service.getEnforcedRefAttributesByEntityId(entity.id) || [];
+
+      primitiveAttrs = primitiveAttrs.filter(function (attr) {
+        return attr.willEnforced;
+      });
+
+      return entityDehydrator(entity, primitiveAttrs.concat(refAttrs));
+    });
+
+    var entitiesTobeEnforced = entities.filter(function (entity) {
+      return entity.willEnforced;
+    });
+
+    return new Promise(function (resolve, reject) {
+      fetchData(resource, JSON.stringify(data), options).then(function (payload) {
+
+        var result = JSON.parse(payload).result;
+
+        if (
+          result &&
+          result.Message &&
+          result.Message.trim().toLowerCase() === 'success'
+        ) {
+          // postACLs(entitiesTobeEnforced.map(function (e) { return e.id }), securedEntities).then(function () {
+          //  resolve(entities);
+          // });
+			
+          resolve(entities);
+        }
+        else {
+          reject(new Error(payload));
+        }
+      });
+    });
+  }
+	
+  //#endregion
+
+  //#region - event handlers
+  function closeDialogHandler(e) {
+	  uploader.hide();
+	  util.reloadPage();
+  }
+	
+  function homeHandler(e) {
+
+  }
+  function saveHandler(e) {
+    var startTimer = Date.now();
+    var entitiesTobeEnforced = service.getWillEnforcedEntities();
+    var entitiesTobeCancelled = service.getWillUnEnforcedEntities();
+    var entities = entitiesTobeEnforced.concat(entitiesTobeCancelled);
+    var curIndex = 0;
+    var len = entities.length;
+
+    if (len === 0) {
+      return;
+    }
+	
+    uploader.setTotal(len);
+    uploader.setCurrentIndex(curIndex + 1);
+    uploader.setCurrentEntityName(entities[curIndex].displayName);
+    uploader.show();
+
+    curIndex++;
+    postEntities(entitiesTobeEnforced, entitiesTobeCancelled.map(function (info) {
+      return {
+        name: info.name,
+        displayName: info.displayName
+      };
+    })).then(function () {		
+		var ga = sdk.getGlideAjaxInstance('PDPApi');
+       ga.addParam('sysparm_name', 'syncPolicyModel');
+		var data = toEntityPolicyModel(entitiesTobeEnforced);
+		ga.addParam('sysparm_data', data);
+		ga.getXML(function(res){
+			try{
+				 var xmlDoc = res.responseXML;
+                 var xmlNode = xmlDoc && xmlDoc.documentElement;
+                 var result = util.objectify(xmlNode);
+				if(result && result.xml && !result.xml.error){
+	if(result.xml.answer && result.xml.answer.status == '0'){
+		var endTimer = Date.now();
+		var timeSpan = endTimer - startTimer;
+		var timeSlice = timeSpan / len;
+		
+		var uploadTimer = setInterval(function () {
+			if (curIndex <= len - 1) {
+				uploader.setCurrentEntityName(entities[curIndex].displayName);
+				uploader.setCurrentIndex(curIndex + 1);
+				curIndex++;
+			} else {
+				clearInterval(uploadTimer);
+				setTimeout(function () {
+					var differnce = array_diff(securedEntities, entitiesTobeEnforced.map(function (e) {
+						return e.id
+					}));
+					if (differnce.added.length == 0 && differnce.removed.length == 0) {
+						util.reloadPage();
+					} else {
+						//parent.renderCustomizeACLPage(differnce);
+					}
+					
+				}, 100);
+			}
+		}, timeSlice);
+	}else{
+		uploader.secureNextStepHide();
+		uploader.secureEntitiesResultShow();
+		//alert('Secure entities failed,please try again or check EMSN log for more error information.');
+		//util.reloadPage();
+	}
+}
+else
+	{
+	if(result && result.xml){
+		uploader.secureNextStepHide();
+		uploader.secureEntitiesResultShow();
+        //util.reloadPage();
+	}
+}
+			}
+			catch(e){
+	    uploader.secureNextStepHide();
+		uploader.secureEntitiesResultShow();
+        //util.reloadPage();
+			}});
+/*fetchPDPFunc('syncPolicyModel', {
+	data: toEntityPolicyModel(entitiesTobeEnforced)
+}).then(function () {
+	var endTimer = Date.now();
+	var timeSpan = endTimer - startTimer;
+	var timeSlice = timeSpan / len;
+	
+	var uploadTimer = setInterval(function () {
+		if (curIndex <= len - 1) {
+			uploader.setCurrentEntityName(entities[curIndex].displayName);
+			uploader.setCurrentIndex(curIndex + 1);
+			curIndex++;
+		} else {
+			clearInterval(uploadTimer);
+			setTimeout(function () {
+				var differnce = array_diff(securedEntities, entitiesTobeEnforced.map(function (e) {
+					return e.id
+				}));
+				if (differnce.added.length == 0 && differnce.removed.length == 0) {
+					util.reloadPage();
+				} else {
+					//parent.renderCustomizeACLPage(differnce);
+				}
+				
+			}, 100);
+		}
+	}, timeSlice);
+	
+}).catch(function (e) {
+	jslog(e);
+});
+
+}).catch(function (e) {
+	alert(e.message);
+	jslog(e);
+});*/
+});}
+
+  function exportAndSaveHandler(e) {
+
+    var entitiesTobeEnforced = service.getWillEnforcedEntities();
+
+    util.download(toEntityPolicyModel(entitiesTobeEnforced), util.format('{0}_{1}.bin', 'NextLabs_ServiceNow_PolicyModel', Date.now()));
+
+    var saveEvt = util.createEvent('click');
+    elements.topSaveBtn.dispatchEvent(saveEvt);
+  }
+
+  function toEntityPolicyModel(entitiesTobeEnforced) {
+    var pmEntities = entitiesTobeEnforced.map(function (entity) {
+      return _extend({}, entity, { attributes: service.getWillEnforcedAttributesByEntityId(entity.name) });
+    });
+
+    var policy = util.getPolicyModel(pmEntities);
+
+    return JSON.stringify(policy);
+  }
+
+  function scopeSelectHandler(e) {
+	  var scope = elements.scopeSelector.value.trim();
+	  jslog(util.format('scopeSelectHandler :{0}', scope));
+	  var el = document.getElementById("ecSection");
+	  var ec = document.getElementById("entitiesCategory");		
+	  ec.value = "0";
+	  showEntitiesCategory2();
+	  
+	  if (scope === 'global') {
+	    el.classList.remove('hide');  
+
+	  }
+	  else{
+		el.classList.add('hide');   
+	  }
+  }
+
+  function showDropdownHandler(e) {
+
+  }
+
+  function searchHandler(e) {
+    if (elements.searchBox) {
+
+      pagerSearch.keywords = elements.searchBox.value.trim();
+      pagerSearch.scope = elements.scopeSelector.value.trim();
+      pagerSearch.level = elements.showSelector.value.trim();
+	  pagerSearch.ecLabel = getEntityClassificationLabel();
+
+      curPager = pagerSearch;
+      elements.pagerList.onclick = pagerSearch.pagerHandler.bind(this);
+
+      fetchSearchList().then(function (entityIds) {
+        if (!Array.isArray(entityIds)) {
+          return;
+        }
+
+        var maxPageIndex = Math.ceil(curPager.total / curPager.size);
+        var pageSize =
+          maxPageIndex > curPager.size ? curPager.size : maxPageIndex;
+
+        curPager.setStart(1);
+        curPager.setEnd(pageSize);
+        curPager.setCurrentPageIndex(1);
+
+        var entities = [];
+
+        entities = entityIds.map(function (id) {
+          return service.getEntityById(id);
+        });
+
+        renderEntityList(entities);
+        renderPagerList();
+      })
+
+    } else {
+      jslog('searchHandler failed, search input element not found.');
+    }
+  }
+
+  function removeEntityHandler(e) {
+    var el = e.target;
+    var entityId = el && e.target.getAttribute('data-id');
+
+    if (entityId) {
+      var checkbox = elementMaps.entityCheckboxes[entityId];
+      if (checkbox) {
+        var evt = util.createEvent('click');
+        checkbox.dispatchEvent(evt);
+      } else {
+        jslog(
+          util.format(
+            'checkbox of {0} not found.unenforce {1} manually.',
+            entityId,
+            entityId
+          )
+        );
+        service.setEntityEnforcement(entityId, false);
+        removeEntityFromSummary(entityId);
+        setEntityCount();
+      }
+    } else {
+      jslog(
+        'removeEntityHandler failed, entityId not found not attribute["data-id"]'
+      );
+    }
+  }
+
+  function removeAttrHandler(e) {
+    var el = e.target;
+    var liEl = el && el.parentElement;
+    var ulEl = liEl && liEl.parentElement;
+    var isRefAttr = !!el.getAttribute('data-is-ref-attr');
+    var compositeId = el && el.getAttribute('data-id');
+
+    if (compositeId && compositeId.split(':').length === 2) {
+
+      var entityId = compositeId.split(':')[0];
+      var checkbox = $(util.format('input[id="{0}"]', compositeId));
+
+      if (checkbox) {
+
+        //trigger attribute checkbox recheck
+        var evt = util.createEvent('click');
+        checkbox.dispatchEvent(evt);
+      }
+      else {
+
+        jslog(util.format('checkbox of {0} not found. remove attribute manually.', compositeId));
+        var entityCheckbox = elementMaps.entityCheckboxes[entityId];
+
+        if (isRefAttr) {
+          jslog(util.format('remove ref attribute {0} manually', compositeId));
+          service.setRefAttributeEnforcement(compositeId, false);
+          updateRefAttrTableCell(compositeId.split('.')[0]);
+        } else {
+          service.setAttributeEnforcement(compositeId, false);
+        }
+
+        if (entityCheckbox) {
+          entityCheckbox.checked = false;
+          var entityEvt = util.createEvent('click');
+          entityCheckbox.dispatchEvent(entityEvt);
+        }
+        else {
+          jslog(util.format('removeAttrHandler failed, checkbox of entity: {0} not found. Remove attr manually', entityId));
+
+          if (ulEl) {
+            ulEl.removeChild(liEl)
+          } else {
+            jslog(util.format('removeAttrHandler failed, remove {0} attr manually failed, ul not found', entityId));
+          }
+        }
+      }
+    }
+  }
+
+  function selectAllEntitiesHandler(e) {
+
+    if (e.target && e.target.type.trim().toLowerCase() === 'checkbox') {
+
+      var isEnforced = e.target.checked;
+
+      var checkboxEls = Object.keys(elementMaps.entityCheckboxes).map(function (entityId) {
+        return elementMaps.entityCheckboxes[entityId];
+      });
+
+      checkboxEls.forEach(function (el) {
+        if (el && el.checked !== isEnforced) {
+          var evt = util.createEvent('click');
+          el.dispatchEvent(evt);
+        }
+      });
+    }
+  }
+
+  function entityCheckHandler(e) {
+    if (
+      elements.summaryEntityListEl &&
+      e &&
+      e.target &&
+      e.target.type === 'checkbox'
+    ) {
+      var inputEl = e.target;
+      var entityId = inputEl.id;
+      var ischecked = inputEl.checked;
+
+      service.setEntityEnforcement(entityId, ischecked);
+      setEntityCount();
+
+      if (ischecked) {
+        removeEntityFromSummary(entityId);
+        addEntityToSummary(entityId);
+      } else {
+        removeEntityFromSummary(entityId);
+      }
+    }
+  }
+
+  function attrCheckHandler(e) {
+    if (e.target && e.target.type === 'checkbox') {
+      var inputEl = e.target;
+      var tdEl = inputEl.parentElement;
+      var unfoldEl = $('.unfolder-wrap', tdEl);
+      var compositeId = inputEl.id;
+      var entityId = compositeId.split(':')[0];
+      var attr = service.getAttributeByCompositeId(compositeId);
+      var entityCheckbox = elementMaps.entityCheckboxes[entityId];
+
+      if (attr) {
+
+        elements.fieldConfirmBtn.onclick = fieldSelectorConfirmHandler;
+
+        if (attr.datatype === 'reference' && !attr.willEnforced) {
+
+          if (inputEl.checked) {
+            inputEl.checked = false;
+            treeviewSelector.wrap.setAttribute('data-id', util.format('{0}:{1}', TABLE_REF_PREFIX, entityId));
+            treeviewSelector.wrap.setAttribute('data-ref-attr', util.format('{0}:{1}', TABLE_REF_PREFIX, compositeId));
+            referenceAttrCheckHandler(attr);
+          }
+          else {
+            //unenforce all enforced referenc attribuets
+            service.setBatchRefAttributeEnforcementById(compositeId, false);
+            updateRefAttrTableCell(compositeId);
+
+            unfoldEl.classList.add('hide');
+
+            entityCheckbox.checked = false;
+            var evt = util.createEvent('click');
+            entityCheckbox.dispatchEvent(evt);
+          }
+        }
+        else {
+
+          service.setAttributeEnforcement(compositeId, inputEl.checked);
+          entityCheckbox.checked = false;
+
+          var evt = util.createEvent('click');
+          entityCheckbox.dispatchEvent(evt);
+        }
+      }
+      else {
+        jslog(util.format('attrCheckHandler failed, entity: {0}, compositeId: {1}', entityId, compositeId))
+      }
+    }
+  }
+
+  /**
+   * 
+   * @param {SE.ViewModel.Attribute} attr 
+   */
+  function referenceAttrCheckHandler(attr) {
+
+    if (!attr) {
+      throw new Error('referenceAttrCheckHandler failed, invalid attribute');
+    }
+
+    treeviewSelector.clear();
+
+    if (treeviewSelector.wrap) {
+
+      var entityId = attr.referenceTable;
+      var entity = service.getEntityById(entityId);
+
+      if (entity.name) {
+        treeviewSelector.wrap.appendChild(renderTableNode(entity.id, attr.name, attr.displayName));
+      }
+      else {
+        fetchNxlMetaEntity(entityId).then(function (fetchedEntityId) {
+
+          entity = service.getEntityById(fetchedEntityId);
+
+          treeviewSelector.wrap.appendChild(renderTableNode(entity.id, attr.name, attr.displayName));
+        });
+      }
+
+      treeviewSelector.show();
+    }
+    else {
+      jslog(util.format('referenceAttrCheckHandler failed, treeview wrap element not found'));
+    }
+  }
+
+  function toggleAttrsHandler(e) {
+    var toggleBtn = e.currentTarget;
+    var entityId = toggleBtn.getAttribute('data-id');
+    var isExpand =
+      toggleBtn.getAttribute('data-expand') === 'true' ? true : false;
+    var tableWrap = toggleBtn.nextElementSibling;
+    var anchor = $('a', toggleBtn);
+
+    if (tableWrap && anchor) {
+      toggleBtn.setAttribute('data-expand', (!isExpand).toString());
+
+      if (isExpand) {
+        tableWrap.classList.add('hide');
+        anchor.textContent = 'Show Fields';
+      } else {
+        tableWrap.classList.remove('hide');
+        anchor.textContent = 'Hide Fields';
+
+        var renderTable = function () {
+          //first remove old the table.
+          var curNode = tableWrap.firstElementChild;
+
+          while (curNode) {
+            if (curNode.nodeName === 'TABLE') {
+              tableWrap.removeChild(curNode);
+            }
+            curNode = curNode.nextElementSibling;
+          }
+
+          var attrs = service.getAttributesByEntityId(entityId);
+		  var filteredAttrs = attrs.filter(item=>item.datatype=='reference'||item.datatype=='string'||item.datatype=='boolean'||item.datatype=='integer');
+          tableWrap.appendChild(renderAttrTable(filteredAttrs, entityId));
+        };
+
+        var attrFetchStatus = service.getEntityAttrFetchStatus(entityId);
+
+        if (!attrFetchStatus.isFetched) {
+          fetchMetaAttribute(entityId).then(function () {
+            service.setEntityAttrFetchStatus(entityId, true);
+            renderTable();
+          });
+        } else {
+          renderTable();
+        }
+      }
+    } else {
+      jslog('toggleAttrsHandler failed. table wrap not found');
+    }
+  }
+
+  function selectAllAttrHandler(e) {
+
+    if (e.target && e.target.type && e.target.type.trim().toLowerCase() === 'checkbox') {
+
+      var el = e.target;
+      var tableBodyEl = el.parentElement.parentElement.parentElement.nextElementSibling;
+      var needEnforced = el.checked;
+      var entityId = el.id.split('-')[0];
+      var attrCheckboxs = tableBodyEl.querySelectorAll(util.format('input[id^="{0}"', entityId));
+
+      Array.prototype.slice.call(attrCheckboxs).forEach(function (el) {
+
+        var compositeId = el.id;
+        var attr = service.getAttributeByCompositeId(compositeId);
+
+        if (attr.datatype === 'reference' && needEnforced) {
+          return;
+        }
+        else {
+          var evt = util.createEvent('click');
+          el.checked = !needEnforced;
+          el.dispatchEvent(evt);
+        }
+      });
+
+    }
+  }
+
+  function summaryExpandHandler(e) {
+    var toggleBtn = e.target;
+    var parentEl = toggleBtn.parentElement;
+    var isExpand =
+      toggleBtn.getAttribute('data-expand') === 'true' ? true : false;
+
+    if (parentEl && parentEl.nextElementSibling) {
+      toggleBtn.setAttribute('data-expand', (!isExpand).toString());
+      toggleBtn.textContent = isExpand ? '+' : '-';
+      parentEl.nextElementSibling.classList.toggle('hide');
+    }
+  }
+
+  function pagerPrevHandler(e) {
+    var current = curPager.current - 1;
+    var start = curPager.start - curPager.size;
+    var end = curPager.start - 1;
+    if (current < curPager.start) {
+      curPager.setStart(start);
+      curPager.setEnd(end);
+      renderPagerList();
+    }
+    elements.pagerList.querySelector('li[data-id="' + current + '"]').click();
+  }
+
+  function pagerNextHandler(e) {
+    var current = curPager.current + 1;
+    var start = curPager.end + 1;
+    var end = curPager.end + curPager.size;
+    if (curPager.end < current) {
+      if (curPager.total < end * curPager.size) {
+        var rest = curPager.total - curPager.end * curPager.size;
+        var maxPageIndex = Math.ceil(rest / curPager.size);
+
+        end = start + maxPageIndex - 1;
+      }
+
+      curPager.setStart(start);
+      curPager.setEnd(end);
+
+      renderPagerList();
+    }
+    elements.pagerList.querySelector('li[data-id="' + current + '"]').click();
+  }
+
+  function fieldSelectorConfirmHandler(e) {
+
+    var selectedAttrNames = getCheckedAttributeNames(treeviewSelector.wrap);
+    var entityId = treeviewSelector.wrap.getAttribute('data-id').split(':')[1];
+    var entityAttrId = treeviewSelector.wrap.getAttribute('data-ref-attr').slice(TABLE_REF_PREFIX.length + 1);
+    var entityCheckboxEl = elementMaps.entityCheckboxes[entityId];
+    var attrCheckboxEl = $(util.format('input[id="{0}"]', entityAttrId));
+
+    if (attrCheckboxEl) {
+
+      var tdEl = attrCheckboxEl.parentElement
+      var unfoldEl = $('.unfolder-wrap', tdEl)
+
+      attrCheckboxEl.checked = true;
+
+      if (selectedAttrNames.length) {
+        unfoldEl.classList.remove('hide')
+      } else {
+        unfoldEl.classList.add('hide')
+      }
+    }
+    else {
+      jslog(util.format('fieldSelectorConfirmHandler -> get attribute checkbox failed, compositeId: {0}', entityAttrId));
+    }
+
+    //unenforce previous reference attributes
+    var prevClassifiedEnforcedRefAttrs = selectedAttrNames.reduce(function (prev, attr) {
+      prev[util.format('{0}:{1}', entityId, attr.column_name).split('.')[0]] = 1;
+      return prev;
+    }, {});
+    var prevEnforcedRefAttrCompositeIds = Object.keys(prevClassifiedEnforcedRefAttrs);
+
+    prevEnforcedRefAttrCompositeIds.forEach(function (compositeId) {
+      service.setBatchRefAttributeEnforcementById(compositeId, false);
+    });
+
+    //store new enforced referenced attributes
+    selectedAttrNames.forEach(function (attr) {
+      refAttributeHydrator(attr, entityId);
+      refAttrEnforcerHydrator(util.format('{0}:{1}', entityId, attr.column_name), true);
+    });
+
+    var refAttrs = selectedAttrNames.map(function (attr) {
+      return service.getEnforcedRefAttributeByCompositeId(util.format('{0}:{1}', entityId, attr.column_name));
+    }).filter(function (attr) { return !!attr });
+
+    var refAttrTableCellMap = refAttrs.reduce(function (prev, attr) {
+
+      //used to get data cells instead of storing.
+      //eg: "alm_asset:assigned_to" (not "alm_asset:assigned_to.xxx.xxx").
+      var compositeId = util.format('{0}:{1}', attr.table, attr.name.split('.')[0]);
+      var refAttrTableCell = getRefAttributeTableCell(compositeId);
+
+      if (refAttrTableCell) {
+        refAttrTableCell.textContent = '';
+        prev[compositeId] = prev[compositeId] || refAttrTableCell;
+      }
+      else {
+        jslog(util.format('fieldSelectorConfirmHandler -> get ref attributes tabel cells failed, compositeId: {0}', compositeId));
+      }
+
+      return prev;
+
+    }, {});
+
+    refAttrs.forEach(function (attr) {
+
+      //used to get data cells instead of storing.
+      //eg: "alm_asset:assigned_to" (not "alm_asset:assigned_to.xxx.xxx").
+      var compositeId = util.format('{0}:{1}', attr.table, attr.name.split('.')[0]);
+      var refAttrTableCell = refAttrTableCellMap[compositeId];
+
+      if (refAttrTableCell) {
+        refAttrTableCell.appendChild(renderRefAttributes(attr));
+      }
+      else {
+        jslog(util.format('fieldSelectorConfirmHandler -> empty tabel cells, compositeId: {0}', compositeId));
+      }
+    });
+
+    if (entityCheckboxEl) {
+      var evt = util.createEvent('click');
+      entityCheckboxEl.checked = false;
+      entityCheckboxEl.dispatchEvent(evt);
+    }
+    else {
+      jslog(util.format('fieldSelectorConfirmHandler -> trigger entity checked failed, checkbox of {0} not found', entityId));
+    }
+
+    treeviewSelector.hide();
+    treeviewSelector.clear();
+
+    jslog(selectedAttrNames);
+  }
+
+  function fieldSelectorModifyConfirmHandler(e) {
+
+    var selectedAttrNames = getChangedAttributeNames(treeviewSelector.wrap);
+    var entityId = treeviewSelector.wrap.getAttribute('data-id').split(':')[1];
+    var entityAttrId = treeviewSelector.wrap.getAttribute('data-ref-attr').slice(TABLE_REF_PREFIX.length + 1);
+    var entityCheckboxEl = elementMaps.entityCheckboxes[entityId];
+    var attrCheckboxEl = $(util.format('input[id="{0}"]', entityAttrId));
+    var prevSelectedRefAttrs = service.getEnforcedRefAttributesByCompositeId(entityAttrId).reduce(function (prev, val) {
+      prev[val.name] = {
+        column_id: val.id,
+        column_name: val.name,
+        column_label: val.displayName,
+        active: true,
+        is_reference: true,
+        type: val.datatype
+      };
+      return prev
+    }, {});
+    var curSelectedRefAttrs = selectedAttrNames.reduce(function (prev, val) { prev[val.column_name] = val; return prev }, {});
+    var totalSelectedRefAttrs = _extend({}, prevSelectedRefAttrs, curSelectedRefAttrs);
+
+    if (attrCheckboxEl) {
+
+      var tdEl = attrCheckboxEl.parentElement
+      var unfoldEl = $('.unfolder-wrap', tdEl)
+
+      attrCheckboxEl.checked = true;
+
+      if (Object.keys(totalSelectedRefAttrs).filter(function (k) { return totalSelectedRefAttrs[k].active }).length) {
+        unfoldEl.classList.remove('hide')
+        attrCheckboxEl.checked = true
+      } else {
+        unfoldEl.classList.add('hide')
+        attrCheckboxEl.checked = false
+      }
+    }
+    else {
+      jslog(util.format('fieldSelectorConfirmHandler -> get attribute checkbox failed, compositeId: {0}', entityAttrId));
+    }
+
+    //update referenced attributes
+    selectedAttrNames.forEach(function (attr) {
+      refAttributeHydrator(attr, entityId);
+      refAttrEnforcerHydrator(util.format('{0}:{1}', entityId, attr.column_name), !!attr.active);
+    });
+
+    var enforcedRefAttrs = Object.keys(totalSelectedRefAttrs).map(function (refAttrId) {
+      return service.getEnforcedRefAttributeByCompositeId(util.format('{0}:{1}', entityId, refAttrId));
+    }).filter(function (attr) { return !!attr });
+
+    var refAttrs = service.getAllRefAttributesByCompositeId(entityAttrId)
+    var refAttrTableCellMap = refAttrs.reduce(function (prev, attr) {
+
+      //used to get data cells instead of storing.
+      //eg: "alm_asset:assigned_to" (not "alm_asset:assigned_to.xxx.xxx").
+      var compositeId = util.format('{0}:{1}', attr.table, attr.name.split('.')[0]);
+      var refAttrTableCell = getRefAttributeTableCell(compositeId);
+
+      if (refAttrTableCell) {
+        refAttrTableCell.textContent = '';
+        prev[compositeId] = prev[compositeId] || refAttrTableCell;
+      }
+      else {
+        jslog(util.format('fieldSelectorConfirmHandler -> get ref attributes tabel cells failed, compositeId: {0}', compositeId));
+      }
+
+      return prev;
+
+    }, {});
+
+    enforcedRefAttrs.forEach(function (attr) {
+
+      //used to get data cells instead of storing.
+      //eg: "alm_asset:assigned_to" (not "alm_asset:assigned_to.xxx.xxx").
+      var compositeId = util.format('{0}:{1}', attr.table, attr.name.split('.')[0]);
+      var refAttrTableCell = refAttrTableCellMap[compositeId];
+
+      if (refAttrTableCell) {
+        refAttrTableCell.appendChild(renderRefAttributes(attr));
+      }
+      else {
+        jslog(util.format('fieldSelectorConfirmHandler -> empty tabel cells, compositeId: {0}', compositeId));
+      }
+    });
+
+    if (entityCheckboxEl) {
+      var evt = util.createEvent('click');
+      entityCheckboxEl.checked = false;
+      entityCheckboxEl.dispatchEvent(evt);
+    }
+    else {
+      jslog(util.format('fieldSelectorConfirmHandler -> trigger entity checked failed, checkbox of {0} not found', entityId));
+    }
+
+    treeviewSelector.hide();
+    treeviewSelector.clear();
+
+    jslog(selectedAttrNames);
+  }
+
+  function toggleTreeNodeHandler(e) {
+
+    var btn = e.target;
+    var wrap = btn && btn.parentElement;
+    var childTreeNodeWrap = wrap && wrap.nextElementSibling;
+    var fieldNodesWrap = wrap && wrap.nextElementSibling;
+
+    if (btn && wrap && fieldNodesWrap && childTreeNodeWrap) {
+
+      var refAttrName = wrap.getAttribute('data-ref-attr');
+      var refPath = wrap.getAttribute('data-path');
+      var isExpand = btn.getAttribute('data-expand') === 'true' ? true : false;
+      var curEntityId = btn.getAttribute('data-table');
+
+      btn.setAttribute('data-expand', (!isExpand).toString());
+
+      if (isExpand) {
+        fieldNodesWrap.classList.add('hide');
+        btn.textContent = '+';
+      }
+      else {
+        fieldNodesWrap.classList.remove('hide');
+        btn.textContent = '-';
+
+        var attrFetchStatus = service.getEntityAttrFetchStatus(curEntityId);
+
+        if (!attrFetchStatus.isFetched) {
+          fetchMetaAttribute(curEntityId).then(function () {
+            innerRenderAttributeNodes(curEntityId, refAttrName, childTreeNodeWrap, refPath);
+          });
+        }
+        else {
+          innerRenderAttributeNodes(curEntityId, refAttrName, childTreeNodeWrap, refPath);
+        }
+      }
+    }
+    else {
+      jslog(util.format('entity {0} fields selector toggle handler failed', entity.id));
+    }
+  }
+
+  function unfoldHandler(e) {
+    //jslog('************ unfold ****************')
+    var target = e.target
+    var compositeId = target.getAttribute('data-id') || ''
+    var entityId = compositeId.split(':')[0]
+
+    treeviewSelector.wrap.setAttribute('data-id', util.format('{0}:{1}', TABLE_REF_PREFIX, entityId));
+    treeviewSelector.wrap.setAttribute('data-ref-attr', util.format('{0}:{1}', TABLE_REF_PREFIX, compositeId));
+
+    if (compositeId) {
+
+      var attr = service.getAttributeByCompositeId(compositeId)
+
+      if (attr && attr.name) {
+        elements.fieldConfirmBtn.onclick = fieldSelectorModifyConfirmHandler
+        referenceAttrCheckHandler(attr)
+      } else {
+        jslog('unfoldHandler failed, invalid attribute')
+      }
+
+    } else {
+      jslog('unfoldHandler failed, no compositeId found')
+    }
+  }
+  ///* for entities classification
+  var ec2_showdata = [];
+  var ec2_valuedata = [];
+  
+  ec2_showdata[0] = [];
+  ec2_valuedata[0] = [];
+  ec2_showdata[0][0] = "Please select";
+  ec2_valuedata[0][0] = "0001";
+  
+  ec2_showdata[1] = [];
+  ec2_valuedata[1] = [];
+  ec2_showdata[1][0] = "Incident Management";
+  ec2_valuedata[1][0] = "0101";
+  ec2_showdata[1][1] = "Problem Management";
+  ec2_valuedata[1][1] = "0102";
+  ec2_showdata[1][2] = "Change Management";
+  ec2_valuedata[1][2] = "0103";
+  ec2_showdata[1][3] = "Release Management";
+  ec2_valuedata[1][3] = "0104";
+  ec2_showdata[1][4] = "Benchmarks";
+  ec2_valuedata[1][4] = "0105";
+  ec2_showdata[1][5] = "Cost and Asset";
+  ec2_valuedata[1][5] = "0106";
+  ec2_showdata[1][6] = "Service Catalog";
+  ec2_valuedata[1][6] = "0107";
+  ec2_showdata[1][7] = "Survey and Assessment";
+  ec2_valuedata[1][7] = "0108";
+  ec2_showdata[1][8] = "Service Level Management";
+  ec2_valuedata[1][8] = "0109";
+  
+  ec2_showdata[2] = [];
+  ec2_valuedata[2] = [];
+  
+  ec2_showdata[2][0] = "Discovery";
+  ec2_valuedata[2][0] = "0201";
+  ec2_showdata[2][1] = "Cloud Management";
+  ec2_valuedata[2][1] = "0202";
+  ec2_showdata[2][2] = "Event Management";
+  ec2_valuedata[2][2] = "0203";
+  ec2_showdata[2][3] = "Orchestration";
+  ec2_valuedata[2][3] = "0204";
+  ec2_showdata[2][4] = "Service Mapping";
+  ec2_valuedata[2][4] = "0205";
+  ec2_showdata[2][5] = "Operational Intelligence";
+  ec2_valuedata[2][5] = "0206";
+  
+  ec2_showdata[3] = [];
+  ec2_valuedata[3] = [];
+  
+  ec2_showdata[3][0] = "Project Portfolio Management";
+  ec2_valuedata[3][0] = "0301";
+  ec2_showdata[3][1] = "Application Portfolio Management";
+  ec2_valuedata[3][1] = "0302";
+  ec2_showdata[3][2] = "Financial Management";
+  ec2_valuedata[3][2] = "0303";
+  ec2_showdata[3][3] = "Performance Analytics";
+  ec2_valuedata[3][3] = "0304";
+  
+  ec2_showdata[4] = [];
+  ec2_valuedata[4] = [];
+  
+  ec2_showdata[4][0] = "Customer Service Management";
+  ec2_valuedata[4][0] = "0401";
+  ec2_showdata[4][1] = "Field Service Management";
+  ec2_valuedata[4][1] = "0402";
+  ec2_showdata[4][2] = "Knowledge Management";
+  ec2_valuedata[4][2] = "0403";
+  
+  ec2_showdata[5] = [];
+  ec2_valuedata[5] = [];
+  ec2_showdata[5][0] = "none";
+  ec2_valuedata[5][0] = "0501";
+  
+  function showEntitiesCategory2(e) {
+  	jslog('showEntitiesCategory2')
+  	var selectedIndex = elements.entitiesCategory.value.trim();
+  	jslog(selectedIndex);
+    var deselect = document.getElementById("entitiesCategory2");
+    deselect.innerHTML = null ;
+    if(selectedIndex >= 0) {
+        for (var i = 0 ; i < ec2_showdata[selectedIndex].length ; i++){
+		     deselect.options[i] = new Option(ec2_showdata[selectedIndex][i], ec2_valuedata[selectedIndex][i]);	
+			 jslog(deselect.options[i]);
+		}
+
+    }
+    deselect.options[0].selected = true ;
+    deselect.style.display = "inline-block";
+    showEntitiesCategory3();
+  }
+  
+  function showEntitiesCategory3(e) {
+  	jslog('try showEntitiesCategory3')
+  	var selectedIndex = elements.entitiesCategory2.value.trim();
+  	jslog(selectedIndex);
+    var ec3_showdata = [];
+    var ec3_valuedata = [];
+
+    ec3_showdata[0] = "Demand Management";
+    ec3_valuedata[0] = "030101";
+    ec3_showdata[1] = "Resource Management";
+    ec3_valuedata[1] = "030102";
+    ec3_showdata[2] = "Agile Development";
+    ec3_valuedata[2] = "030103";
+	
+    var deselect = document.getElementById("entitiesCategory3");
+    deselect.innerHTML = null;
+    if (selectedIndex === "0301") {
+        for (var i = 0 ; i < ec3_showdata.length ; i++)
+            deselect.options[i] = new Option(ec3_showdata[i], ec3_valuedata[i]);
+
+        deselect.options[0].selected = true;
+        deselect.style.display = "inline-block";
+    }
+  	else{
+  		deselect.style.display = "none";
+		jslog('no need to showEntitiesCategory3')
+  	}
+  }  
+  
+  function getEntityClassificationLabel(){
+	var selectedIndex = elements.entitiesCategory2.value.trim();
+	var label = [];
+	  
+	switch (selectedIndex) {
+		case "0101":
+		  label.push("incident");
+		  break;
+		case "0102":
+		  label.push("problem");
+		  break;
+		case "0103":
+		  label.push("change");
+		  break;
+		case "0104":
+		  label.push("release");
+		  break;
+		case "0105":
+		  label.push("benchmark");
+		  break;
+		case "0106":
+		  label.push("Asset");
+		  label.push("cost");
+		  break;
+		case "0107":
+		  label.push("Service Catalog");
+		  break;
+		case "0108":
+		  label.push("Survey");
+		  label.push("Assessment");
+		  break;		  
+		case "0109":
+		  label.push("Service Level");
+		  break;
+		
+		case "0201":
+		  label.push("Discovery");
+		  break;
+		case "0202":
+		  label.push("Cloud");
+		  break;
+		case "0203":
+		  label.push("Event");
+		  break;
+		case "0204":
+		  label.push("Orche");
+		  break;
+		case "0205":
+		  label.push("Service Map");
+		  break;
+		case "0206":
+		  label.push("Operational");
+		  break;		  
+
+		case "0301":
+		{
+			var index = elements.entitiesCategory3.value.trim();
+			switch (index) {
+				case "030101": 
+				  label.push("demand");
+				  break;
+				case "030102": 
+				  label.push("resource management");
+				  break;
+				case "030103": 
+				  label.push("Agile Development");
+				  break;
+				default:
+				  break;
+			}
+		}
+		  break;	
+		case "0302":
+		  label.push("Application Portfolio");
+		  break;	
+		case "0303":
+		  label.push("Financial Management");
+		  break;	
+		case "0304":
+		  label.push("Performance Analytics");
+		  break;			  
+
+		case "0401":
+		  label.push("Customer Service");
+		  break;  
+		case "0402":
+		  label.push("Field Service");
+		  break;  
+		case "0403":
+		  label.push("Knowledge");
+		  break;  		  
+
+ 		case "0501":
+		  label.push("human");
+		  break;
+		  
+		default:
+		  jslog('getEntityClassificationLabel, should not be here!!!!');
+		  break;
+		  
+	}
+	jslog(util.format('getEntityClassificationLabel :{0}', label));
+	  
+	return label;
+  }
+  //#endregion
+
+  //#region - inner tools
+
+  function setEntityCount() {
+    if (elements.entityCounter) {
+      elements.entityCounter.textContent = service.getWillEnforcedEntities().length;
+    } else {
+      jslog('setEntityCount failed, element not found.');
+    }
+  }
+
+  function addEntityToList(el) {
+    if (!el) {
+      jslog('addEntityToList failed, invalid dom element.');
+      return;
+    }
+
+    if (elements.entityList) {
+      var sepEl = createDOM('<hr class="sep-entity-h"/>');
+      elements.entityList.appendChild(el);
+      elements.entityList.appendChild(sepEl);
+    } else {
+      jslog('addEntityToList failed, entity list element not found.');
+    }
+  }
+
+  function addEntityToSummary(entityId) {
+
+    var entity = service.getEntityById(entityId);
+    var primitiveAttrs = service.getAttributesByEntityId(entityId);
+    var refAttrs = service.getEnforcedRefAttributesByEntityId(entityId);
+
+    var el = renderSummaryEntityCard(entity, primitiveAttrs);
+    var attrsWrap = $('ul[class*="summary-attrs-wrap"]', el);
+    var attrsCounter = $(util.format('em[id="{0}-attr-counter"]', entityId), el);
+
+    if (attrsWrap) {
+      refAttrs.forEach(function (attr) {
+        attrsWrap.appendChild(renderRefSummaryAttr(attr));
+      });
+    }
+    else {
+      jslog('addEntityToSummary -> append reference attributes failed, attribute wrap not found');
+    }
+
+    if (attrsCounter) {
+      attrsCounter.textContent = Number(attrsCounter.textContent.trim()) + refAttrs.length;
+    }
+    else {
+      jslog('addEntityToSummary -> set attributes counter failed, counter not found');
+    }
+
+    var sepEl = createDOM('<hr class="sep-summary-h"/>');
+    var referenceNode = findAdjacentInsertNode(entityId);
+
+    if (referenceNode) {
+      var nodeInsert = referenceNode.insertAdjacentElement(insertAdjacentElementPositions.beforeCurrentElement, el);
+
+      if (nodeInsert) {
+        elementMaps.summary[entityId] = nodeInsert;
+        nodeInsert.insertAdjacentElement(insertAdjacentElementPositions.afterCurrentElement, sepEl);
+      }
+      else {
+        jslog(util.format('addEntityToSummary failed, entity: {0}', entityId));
+      }
+    }
+    else {
+      elementMaps.summary[entityId] = el;
+      elements.summaryEntityListEl.appendChild(el);
+      elements.summaryEntityListEl.appendChild(sepEl);
+    }
+  }
+
+  function removeEntityFromSummary(entityId) {
+    var el = elementMaps.summary[entityId];
+
+    if (el && el.nodeType === 1) {
+      var sep = el.nextElementSibling;
+
+      if (sep && sep.nodeName === 'HR') {
+        elements.summaryEntityListEl.removeChild(sep);
+        elements.summaryEntityListEl.removeChild(el);
+        elementMaps.summary[entityId] = null;
+      } else {
+        jslog('removeEntityFromSummary failed, sep element not found.');
+      }
+    }
+  }
+
+  /**
+   * find adjacent node to insert by ascend entity display name.
+   * @param {string} id - the id of entity to be added to summary
+   * @return {Element}
+   */
+  function findAdjacentInsertNode(id) {
+    var matchNode = null;
+    var entity = service.getEntityById(id);
+    var displayName = entity && entity.displayName;
+
+    if (displayName) {
+      var curNode = elements.summaryEntityListEl.firstElementChild;
+
+      while (curNode) {
+        var targetId = curNode.getAttribute('data-id');
+        var targetEntity = targetId && service.getEntityById(targetId);
+        var targetDisplayName = targetEntity && targetEntity.displayName;
+
+        if (targetDisplayName) {
+          if (targetDisplayName.toLowerCase() > displayName.toLowerCase()) {
+            matchNode = curNode;
+            break;
+          }
+        }
+        curNode = curNode.nextElementSibling;
+      }
+    } else {
+      jslog(util.format('findAdjacentInsertNode of {0} failed.', id));
+    }
+
+    return matchNode;
+  }
+
+  /**
+   * @param {HTMLElement} element 
+   * @return {boolean}
+   */
+  function isLeafNode(element) {
+
+    var isLeaf = true;
+
+    if (element) {
+
+      if (!element.classList.contains('tree-node-content') || !element.title) {
+        isLeaf = false;
+      }
+
+    }
+    else {
+      isLeaf = false;
+    }
+
+    return isLeaf;
+  }
+
+  /**
+   * @param {HTMLElement} element 
+   * @return {boolean}
+   */
+  function isLeafChecked(element) {
+
+    var isChecked = false;
+    var checkboxSelector = 'input[type=checkbox]';
+    var checkboxEl = $(checkboxSelector, element);
+
+    isChecked = checkboxEl.checked;
+
+    return isChecked;
+  }
+
+  /**
+    * @param {HTMLElement} element 
+    * @return {boolean}
+  */
+  function isLeafCheckedPrev(namePath, curLeafName) {
+
+    if (namePath.indexOf('.') === 0) {
+      namePath = namePath.slice(1)
+    }
+
+    namePath = util.format('{0}.{1}', namePath, curLeafName)
+
+    var entityId = treeviewSelector.wrap.getAttribute('data-id').split(':')[1]
+    var compositeId = util.format('{0}:{1}', entityId, namePath)
+    var refAttr = service.getEnforcedRefAttributeByCompositeId(compositeId)
+
+    return (refAttr && refAttr.willEnforced);
+  }
+
+  /**
+   * @param {HTMLElement} element 
+   * @return {{ name: string, displayName: string }}
+   */
+  function getAttributeNamesFromLeaf(element) {
+
+    var attrName = '';
+    var attrDisplayName = '';
+    var checkboxSelector = 'input[type=checkbox]';
+    var checkboxEl = $(checkboxSelector, element);
+
+    attrName = checkboxEl.id.split(':')[2];
+    attrDisplayName = checkboxEl.getAttribute('data-ref-attr-displayname');
+
+    return {
+      name: attrName,
+      displayName: attrDisplayName
+    };
+  }
+
+  /**
+   * @param {HTMLElement} element 
+   * @return {{ name: string, displayName: string }}
+   */
+  function getAttributeNamesFromBranch(element) {
+
+    var attrName = '';
+    var attrDisplayName = '';
+    var contentSelector = 'div[class=tree-node-content]:first-child';
+    var contentNode = $(contentSelector, element);
+
+    if (contentNode) {
+      attrName = contentNode.getAttribute('data-ref-attr');
+      attrDisplayName = contentNode.getAttribute('data-ref-attr-displayname');
+    }
+    else {
+      jslog('getAttributeNameFromBranch failed, no table content node found.');
+    }
+
+    return {
+      name: attrName,
+      displayName: attrDisplayName
+    };
+  }
+
+  /**
+   * @param {HTMLElement} root
+   * @return {SE.APIModel.NxlEnforcedAttribute[]} 
+   */
+  function getCheckedAttributeNames(root) {
+
+    var attrNames = [];
+    var pathName = '';
+    var pathDisplayName = '';
+
+    var dfs = function (namePath, displayNamePath, node) {
+
+      if (node) {
+        if (isLeafNode(node)) {
+          if (isLeafChecked(node)) {
+            var leafNames = getAttributeNamesFromLeaf(node);
+            var rawCompositeId = node.title || '';
+            var compositeId = rawCompositeId.replace('.', ':');
+            var attr = service.getAttributeByCompositeId(compositeId);
+
+            //remove first empty dot
+            if (namePath.indexOf('.') === 0) {
+              namePath = namePath.slice(1);
+            }
+
+            if (displayNamePath.indexOf('.') === 0) {
+              displayNamePath = displayNamePath.slice(1);
+            }
+
+            attrNames.push({
+              column_id: util.format('{0}.{1}', namePath, leafNames.name),
+              column_name: util.format('{0}.{1}', namePath, leafNames.name),
+              column_label: util.format('{0}."{1}"', displayNamePath, leafNames.displayName),
+              active: true,
+              is_reference: true,
+              type: attr.datatype
+            });
+          }
+        }
+        else {
+
+          var refAttrNames = getAttributeNamesFromBranch(node);
+          namePath = util.format('{0}.{1}', namePath, refAttrNames.name);
+          //namePath = namePath.length === refAttrNames.name.length + 1 ? namePath.slice(1) : namePath;
+          displayNamePath = util.format('{0}."{1}"', displayNamePath, refAttrNames.displayName);
+          //displayNamePath = displayNamePath.length === refAttrNames.displayName.length + 1 ? displayNamePath.slice(1) : displayNamePath;          
+
+          var contentNode = node.firstElementChild;
+          var childNodesWrap = contentNode.nextElementSibling;
+          var curNode = childNodesWrap.firstElementChild;
+
+          while (curNode) {
+            dfs(namePath, displayNamePath, curNode);
+            curNode = curNode.nextElementSibling;
+          }
+        }
+      }
+    }
+
+    var curChildNode = root.firstElementChild;
+
+    while (curChildNode) {
+
+      dfs(pathName, pathDisplayName, curChildNode);
+      curChildNode = curChildNode.nextElementSibling;
+    }
+
+    return attrNames;
+  }
+
+  /**
+   * @param {HTMLElement} root
+   * @return {SE.APIModel.NxlEnforcedAttribute[]} 
+   */
+  function getChangedAttributeNames(root) {
+
+    var attrNames = [];
+    var pathName = '';
+    var pathDisplayName = '';
+
+    var dfs = function (namePath, displayNamePath, node) {
+
+      if (node) {
+        if (isLeafNode(node)) {
+
+          var leafNames = getAttributeNamesFromLeaf(node);
+          var rawCompositeId = node.title || '';
+          var compositeId = rawCompositeId.replace('.', ':');
+          var attr = service.getAttributeByCompositeId(compositeId);
+
+          if (isLeafChecked(node)) {
+
+            //remove first empty dot
+            if (namePath.indexOf('.') === 0) {
+              namePath = namePath.slice(1);
+            }
+
+            if (displayNamePath.indexOf('.') === 0) {
+              displayNamePath = displayNamePath.slice(1);
+            }
+
+            attrNames.push({
+              column_id: util.format('{0}.{1}', namePath, leafNames.name),
+              column_name: util.format('{0}.{1}', namePath, leafNames.name),
+              column_label: util.format('{0}."{1}"', displayNamePath, leafNames.displayName),
+              active: true,
+              is_reference: true,
+              type: attr.datatype
+            });
+          } else if (isLeafCheckedPrev(namePath, leafNames.name)) {
+
+            //remove first empty dot
+            if (namePath.indexOf('.') === 0) {
+              namePath = namePath.slice(1);
+            }
+
+            if (displayNamePath.indexOf('.') === 0) {
+              displayNamePath = displayNamePath.slice(1);
+            }
+
+            attrNames.push({
+              column_id: util.format('{0}.{1}', namePath, leafNames.name),
+              column_name: util.format('{0}.{1}', namePath, leafNames.name),
+              column_label: util.format('{0}."{1}"', displayNamePath, leafNames.displayName),
+              active: false,
+              is_reference: true,
+              type: attr.datatype,
+            });
+          }
+        }
+        else {
+
+          var refAttrNames = getAttributeNamesFromBranch(node);
+          namePath = util.format('{0}.{1}', namePath, refAttrNames.name);
+          //namePath = namePath.length === refAttrNames.name.length + 1 ? namePath.slice(1) : namePath;
+          displayNamePath = util.format('{0}."{1}"', displayNamePath, refAttrNames.displayName);
+          //displayNamePath = displayNamePath.length === refAttrNames.displayName.length + 1 ? displayNamePath.slice(1) : displayNamePath;          
+
+          var contentNode = node.firstElementChild;
+          var childNodesWrap = contentNode.nextElementSibling;
+          var curNode = childNodesWrap.firstElementChild;
+
+          while (curNode) {
+            dfs(namePath, displayNamePath, curNode);
+            curNode = curNode.nextElementSibling;
+          }
+        }
+      }
+    }
+
+    var curChildNode = root.firstElementChild;
+
+    while (curChildNode) {
+
+      dfs(pathName, pathDisplayName, curChildNode);
+      curChildNode = curChildNode.nextElementSibling;
+    }
+
+    return attrNames;
+  }
+
+  /**
+   * 
+   * @param {string} compositeId 
+   * @return {HTMLElement}
+   */
+  function getRefAttributeTableCell(compositeId) {
+
+    var inputEl = $(util.format('input[id="{0}"]', compositeId));
+    var tableRowEl = inputEl ? inputEl.parentElement.parentElement : null;
+
+    return tableRowEl ? tableRowEl.lastElementChild : null;
+  }
+
+  /**
+   * @param {SE.ViewModel.Attribute} attr 
+   * @return {boolean}
+   */
+  function isRefAttribute(attr) {
+    return attr.datatype === 'reference';
+  }
+
+  function alphabeticalSorter(a, b, ascending) {
+
+    a = '' + a;
+    b = '' + b;
+
+    a = a.trim().toLowerCase();
+    b = b.trim().toLowerCase();
+
+    if (a < b) {
+      return ascending ? -1 : 1;
+    }
+    else if (a > b) {
+      return ascending ? 1 : -1;
+    }
+    else {
+      return 0;
+    }
+  }
+
+  //#endregion
+
+  //#region - ui rendering
+
+  /**
+   * render entity list
+   * @param {NXL_Entity[]} entities
+   */
+  function renderEntityList(entities) {
+    if (!Array.isArray(entities)) {
+      return;
+    }
+
+    elementMaps.entityCheckboxes = {};
+    elements.selectAllCheckbox.checked = false;
+    clearEntityList();
+
+    innerRenderEntityList(entities);
+  }
+
+  function clearEntityList() {
+    if (elements.entityList) {
+      elements.entityList.textContent = '';
+    } else {
+      jslog('clearEntityList failed.');
+    }
+  }
+
+  /**
+   * render entity list according to the pager.current
+   * - return the length of entities rendered.
+   * @param {SE.ViewModel.Entity[]} entities
+   * @return {Number}
+   */
+  function innerRenderEntityList(entities) {
+    entities.forEach(function (entity) {
+      var entityCard = renderEntityCard(entity);
+      var entityCheckbox = $(util.format('input[id="{0}"]', entity.id), entityCard);
+
+      elementMaps.entityCheckboxes[entity.id] = entityCheckbox;
+      addEntityToList(entityCard);
+    });
+
+    return entities.length;
+  }
+
+  /**
+   * @param {SE.ViewModel.Entity} entity
+   * @return {HTMLElement}
+   */
+  function renderEntityCard(entity) {
+    var wrap = createDOM('<li class="entity-card"></li>');
+    var checkboxWrap = createDOM('<div class="box checkbox-wrap"></div>');
+    var detailWrap = createDOM('<div class="box entity-item-wrap"></div>');
+    var titleWrap = createDOM('<div class="entity-title-wrap"></div>');
+    var entityTitleEl = createDOM(
+      util.format(
+        '<label class="form-control-inline font-bold font-lg">{0}</label>',
+        entity.displayName
+      )
+    );
+    var entityTitleAreaEl = createDOM(
+      util.format(
+        '<label class="form-control-inline font-bold font-md">{0}</label>',
+        ''
+      )
+    );
+
+    titleWrap.appendChild(entityTitleEl);
+    titleWrap.appendChild(entityTitleAreaEl);
+
+    var checkboxInput = createDOM(
+      util.format(
+        '<input id="{0}" type="checkbox" class="checkbox hide" />',
+        entity.id
+      )
+    );
+    var checkboxLabel = createDOM(
+      util.format(
+        '<label for="{0}" class="box checkbox-presenter"></label>',
+        entity.id
+      )
+    );
+
+    checkboxWrap.appendChild(checkboxInput);
+    checkboxWrap.appendChild(checkboxLabel);
+
+    var entityDesc = createDOM(
+      util.format('<p class="entity-desc font-md">{0}</p>', entity.description)
+    );
+    var toggleBtn = createDOM(
+      util.format(
+        '<p class="show-fields-wrap" data-expand="false" data-id="{0}"><a class="link font-md">Show Fields</a><em class="link font-md"></em></p>',
+        entity.id
+      )
+    );
+    var tableWrap = createDOM('<div class="entity-table-wrap hide"></div>');
+    var tableDesc = createDOM(
+      '<p class="attrs-desc font-md font-blue">Fields available for policy authoring and evaluation</p>'
+    );
+
+    tableWrap.appendChild(tableDesc);
+
+    detailWrap.appendChild(titleWrap);
+    detailWrap.appendChild(entityDesc);
+    detailWrap.appendChild(toggleBtn);
+    detailWrap.appendChild(tableWrap);
+
+    wrap.appendChild(checkboxWrap);
+    wrap.appendChild(detailWrap);
+
+    toggleBtn.onclick = toggleAttrsHandler.bind(this);
+    checkboxInput.onclick = entityCheckHandler.bind(this);
+
+    checkboxInput.checked = entity.willEnforced;
+
+    return wrap;
+  }
+
+  function renderAttrTableHead(id) {
+    var headWrap = createDOM('<thead></thead>');
+    var rowEl = createDOM('<tr></tr>');
+    var checkboxCellEl = createDOM(
+      util.format(
+        '<th class="td-sm td-pad"><input id="{0}-all" type="checkbox" class="checkbox hide" /><label for="{1}-all" class="box"></label></th>',
+        id,
+        id
+      )
+    );
+    var displayNameCellEl = createDOM(
+      '<th class="td-lg"><span class="font-bold font-md">Display Name</span></th>'
+    );
+    var nameCellEl = createDOM(
+      '<th class="td-lg"><span class="font-bold font-md">Name</span></th>'
+    );
+    var datatypeCellEl = createDOM(
+      '<th class="td-lg"><span class="font-bold font-md">Data Type</span></th>'
+    );
+    var tableCellEl = createDOM(
+      '<th class="td-lg"><span class="font-bold font-md">Table</span></th>'
+    );
+    var referenceCellEl = createDOM(
+      '<th class="td-lg"><span class="font-bold font-md">Reference Attributes</span></th>'
+    );
+
+    checkboxCellEl.onclick = selectAllAttrHandler.bind(this);
+
+    rowEl.appendChild(checkboxCellEl);
+    rowEl.appendChild(displayNameCellEl);
+    rowEl.appendChild(nameCellEl);
+    rowEl.appendChild(datatypeCellEl);
+    rowEl.appendChild(tableCellEl);
+    rowEl.appendChild(referenceCellEl);
+    headWrap.appendChild(rowEl);
+
+    return headWrap;
+  }
+
+  /**
+   * @param {SE.ViewModel.Attribute} attr
+   * @return {HTMLElement}
+   */
+  function renderAttrTableRow(attr) {
+
+    var refAttrs = [];
+    var refAttrHTMLFrag = '';
+
+    if (attr && isRefAttribute(attr)) {
+      var compositeId = util.format('{0}:{1}', attr.table, attr.name);
+      refAttrs = service.getEnforcedRefAttributesByCompositeId(compositeId);
+
+      refAttrHTMLFrag = refAttrs.map(function (attr) {
+        return renderRefAttributes(attr).outerHTML;
+      }).join('');
+    }
+
+    var el = createDOM(
+      '<tr>' +
+      '<td class="td-sm">' +
+      util.format(
+        '<input id="{0}" type="checkbox" class="checkbox hide" />',
+        util.format('{0}:{1}', attr.table, attr.id)
+      ) +
+      util.format(
+        '<label for="{0}" class="box"></label>',
+        util.format('{0}:{1}', attr.table, attr.id)
+      ) +
+      util.format(
+        '<div class="btn unfolder-wrap unfolder-wrap-attr {0}" data-id="{1}"><i class="unfolder"></i></div>',
+        refAttrs.length ? '' : 'hide',
+        util.format('{0}:{1}', attr.table, attr.id)
+      ) +
+      '</td>' +
+      util.format(
+        '<td class="td-lg bg-gray-light"><span class="entity-display-name font-default font-md">{0}</span></td>',
+        attr.displayName
+      ) +
+      util.format(
+        '<td class="td-lg"><span class="font-default font-md">{0}</span></td>',
+        attr.name
+      ) +
+      util.format(
+        '<td class="td-lg bg-gray-light"><span class="font-default font-md">{0}</span></td>',
+        attr.datatype
+      ) +
+      util.format(
+        '<td class="td-lg"><span class="font-default font-md">{0}</span></td>',
+        attr.table
+      ) +
+      util.format(
+        '<td class="td-lg" data-ref-attr="{0}">{1}</td>',
+        '',
+        refAttrHTMLFrag
+      ) +
+      '</tr>'
+    );
+
+    var inputEl = $('input[type="checkbox"]', el);
+    var unfoldEl = $('.unfolder-wrap', el);
+    inputEl.onclick = attrCheckHandler;
+    unfoldEl.onclick = unfoldHandler;
+
+    if (attr && isRefAttribute(attr) && refAttrHTMLFrag) {
+      inputEl.checked = true;
+    }
+    else {
+      inputEl.checked = attr.willEnforced;
+    }
+
+    return el;
+  }
+
+  /**
+   * @param {SE.ViewModel.Attribute[]} attrs
+   * @param {string} id entity id
+   * @return {HTMLElement}
+   */
+  function renderAttrTable(attrs, id) {
+
+    var table = createDOM('<table class="entity-table"></table>');
+    var header = renderAttrTableHead(id);
+    var body = document.createElement('tbody');
+
+    attrs.forEach(function (attr) {
+      body.appendChild(renderAttrTableRow(attr));
+    });
+
+    table.appendChild(header);
+    table.appendChild(body);
+
+    return table;
+  }
+
+  function clearSummaryEntityList() {
+    if (elements.summaryEntityListEl) {
+      elements.summaryEntityListEl.textContent = '';
+    } else {
+      jslog('clearSummaryEntityList failed.');
+    }
+  }
+
+  function renderSummaryEntityList() {
+    var entitiesTobeEnforced = service.getWillEnforcedEntities();
+
+    if (entitiesTobeEnforced && entitiesTobeEnforced.length) {
+      entitiesTobeEnforced.forEach(function (entity) {
+        addEntityToSummary(entity.id);
+      });
+    }
+  }
+
+  /**
+   * @param {SE.ViewModel.Entity} entity
+   * @param {SE.ViewModel.Attribute[]} attrs
+   * @return {HTMLElement}
+   */
+  function renderSummaryEntityCard(entity, attrs) {
+    var wrap = createDOM(
+      util.format(
+        '<li class="summary-entity-wrap" data-id="{0}"></li>',
+        entity.id
+      )
+    );
+    var entityWrap = createDOM('<div  class="entity-name-wrap"></div>');
+    var toggleBtn = createDOM(
+      '<i class="box btn attr-toggle-icon" data-expand="false">+</i>'
+    );
+    var entityName = createDOM(
+      util.format(
+        '<span class="summary-entity font-bold">{0} (<em id="{1}-attr-counter">0</em> fields )</span>',
+        entity.displayName,
+        entity.id
+      )
+    );
+    var attrCounter = $('em', entityName);
+    var removeBtn = createDOM(
+      util.format(
+        '<a class="link font-sm summary-remove" data-id="{0}">Remove</a>',
+        entity.id
+      )
+    );
+
+    entityWrap.appendChild(toggleBtn);
+    entityWrap.appendChild(entityName);
+    entityWrap.appendChild(removeBtn);
+
+    var attrsWrap = createDOM('<ul class="grid summary-attrs-wrap hide"></ul>');
+
+    var count = 0;
+
+    if (Array.isArray(attrs)) {
+      attrs.forEach(function (attr) {
+        if (attr.willEnforced) {
+          count += 1;
+          attrsWrap.appendChild(renderSummaryAttr(attr));
+        }
+      });
+    }
+
+    attrCounter.textContent = count;
+
+    wrap.appendChild(entityWrap);
+    wrap.appendChild(attrsWrap);
+
+    toggleBtn.onclick = summaryExpandHandler;
+    removeBtn.onclick = removeEntityHandler;
+    attrsWrap.onclick = removeAttrHandler;
+
+    return wrap;
+  }
+
+  /**
+   * @param {SE.ViewModel.Attribute} attr
+   * @return {HTMLElement}
+   */
+  function renderSummaryAttr(attr) {
+    var wrap = createDOM(
+      util.format(
+        '<li class="box summary-attr-wrap"><span class="font-red font-sm summary-attr">{0}</span><i class="box attr-delete-icon" data-id="{1}"></i></li>',
+        attr.displayName,
+        util.format('{0}:{1}', attr.table, attr.id)
+      )
+    );
+    return wrap;
+  }
+
+  /**
+   * @param {SE.ViewModel.Attribute} attr
+   * @return {HTMLElement}
+   */
+  function renderRefSummaryAttr(attr) {
+    var wrap = createDOM(
+      util.format(
+        '<li class="box summary-attr-wrap"><span class="font-red font-sm summary-attr">{0}</span><i class="box attr-delete-icon" data-id="{1}" data-is-ref-attr="true"></i></li>',
+        attr.displayName,
+        util.format('{0}:{1}', attr.table, attr.id)
+      )
+    );
+    return wrap;
+  }
+
+  function renderPagerList() {
+    clearPagerList();
+    innerRenderPagerList();
+  }
+
+  function clearPagerList() {
+    if (elements.pagerList) {
+      elements.pagerList.textContent = '';
+    } else {
+      jslog('clearPagerList failed.');
+    }
+  }
+
+  /**
+   * render pagers according to the retrieved records.
+   */
+  function innerRenderPagerList() {
+    if (elements.pagerList) {
+      var start = curPager.start;
+      var end = curPager.end;
+
+      for (var i = start; i <= end; i++) {
+        elements.pagerList.appendChild(renderPager(i));
+      }
+    } else {
+      jslog(
+        util.format('renderPagerList failed, element pagerList not found.')
+      );
+    }
+  }
+
+  function renderPager(index) {
+    var pagerEl = createDOM(
+      util.format(
+        '<li class="btn box pager font-md" data-id="{0}">{1}</li>',
+        index,
+        index
+      )
+    );
+    return pagerEl;
+  }
+
+  function setPagerClickState(index) {
+    if (elements.pagerList) {
+      index = Number(index);
+
+      var curNode = elements.pagerList.firstElementChild;
+
+      while (curNode) {
+        var curIndex = Number(curNode.getAttribute('data-id'));
+        if (curIndex === index) {
+          curNode.classList.add('pager-clicked');
+        } else {
+          curNode.classList.remove('pager-clicked');
+        }
+        curNode = curNode.nextElementSibling;
+      }
+    } else {
+      jslog('setPagerClickState failed.');
+    }
+  }
+
+  /**
+   * fill options of ScopeSelector
+   * @param {SE.ViewModel.Scope[]} scopes
+   */
+  function renderScopeSelector(scopes) {
+    if (elements.scopeSelector) {
+      if (Array.isArray(scopes)) {
+        scopes.forEach(function (scope) {
+		  if (scope.displayName.indexOf("NextLabs") == -1) {
+            var optionEl = createDOM(
+              util.format(
+                '<option value="{0}">{1}</option>',
+                scope.id,
+                scope.displayName
+              )
+            );
+            elements.scopeSelector.appendChild(optionEl);
+			//jslog(util.format('scope.displayName={0}', scope.displayName));
+		  }
+		  else {
+			jslog('String "NextLabs xxx" occurs in scopeSelector, remove it.');
+		  }
+        });
+
+        elements.scopeSelector.value = 'global';
+
+      } else {
+        jslog('renderScopeSelector failed, scopes must be Array type.');
+      }
+    } else {
+      jslog('renderScopeSelector failed, element not found.');
+    }
+  }
+
+  /**
+   * @param {string} entityId
+   * @param {string} refAttrName
+   * @param {string} refAttrDisplayName
+   * @return {HTMLElement}
+   */
+  function renderTableNode(entityId, refAttrName, refAttrDisplayName, refPath) {
+
+    var treeNode = createDOM('<div class="tree-node"></div>');
+    var tableNode = renderTableContentNode(entityId, refAttrName, refAttrDisplayName, refPath);
+    var fieldNodesWrap = createDOM('<div class="child-tree-node"></div>');
+
+    treeNode.appendChild(tableNode);
+    treeNode.appendChild(fieldNodesWrap);
+
+    return treeNode;
+  }
+
+  /**
+   * @param {string} entityId
+   * @param {string} refAttrName
+   * @param {string} refAttrDisplayName
+   * @return {HTMLElement}
+   */
+  function renderTableContentNode(entityId, refAttrName, refAttrDisplayName, refPath) {
+
+    var dataPath = refPath ? util.format('{0}.{1}', refPath, refAttrName) : refAttrName;
+    var wrap = createDOM(util.format('<div class="tree-node-content" data-ref-attr="{0}" data-ref-attr-displayname="{1}" data-path="{2}"></div>', refAttrName, refAttrDisplayName, dataPath));
+    var toggleBtn = createDOM(util.format('<i class="box btn attr-toggle-icon" data-table="{0}" data-expand="false">+</i>', entityId));
+    var tableName = createDOM(util.format('<span class="table-name font-bold">{0}</span>', refAttrDisplayName))
+
+    toggleBtn.onclick = toggleTreeNodeHandler;
+    wrap.appendChild(toggleBtn);
+    wrap.appendChild(tableName);
+
+    return wrap;
+  }
+
+  /**
+   * @param {SE.ViewModel.Attribute} attr 
+   * @param {string} entityId
+   * @return {HTMLElement}
+   */
+  function renderLeafNode(attr, entityId, refAttrName, refPath) {
+
+    if (!attr) {
+      throw new Error('renderLeafNode failed, invalid attribute');
+    }
+    var baseRefAttrCompositeId = treeviewSelector.wrap.getAttribute('data-ref-attr').slice(TABLE_REF_PREFIX.length + 1);
+    var enforcedRefAttributes = service.getEnforcedRefAttributesByCompositeId(baseRefAttrCompositeId);
+    var curRefPath = util.format('{0}.{1}', refPath, attr.name);
+    var isEnforcedBefore = enforcedRefAttributes.filter(function (a) { return a.name === curRefPath }).length ? true : false
+    var compositeId = util.format('{0}:{1}:{2}', TREEVIEW_ATTR_PREFIX + (++TREE_NODE_ID).toString(), refAttrName, attr.name);
+    var wrap = createDOM(util.format('<div class="tree-node-content" title="{0}"></div>', entityId + '.' + attr.name));
+    var checkboxWrap = createDOM('<div class="box checkbox-sm-wrap"></div>');
+    var checkboxInput = createDOM(util.format('<input id="{0}" type="checkbox" class="checkbox-sm hide" data-ref-attr-displayname="{1}" {2}/>', compositeId, attr.displayName, isEnforcedBefore ? 'checked' : ''));
+    var checkboxLabel = createDOM(util.format('<label for="{0}" class="box"></label>', compositeId));
+    var attrNameEl = createDOM(util.format('<span class="field-name">{0}</span>', attr.displayName));
+
+    wrap.appendChild(checkboxWrap);
+    wrap.appendChild(attrNameEl);
+
+    checkboxWrap.appendChild(checkboxInput);
+    checkboxWrap.appendChild(checkboxLabel);
+
+    return wrap;
+  }
+
+  /**
+   * 
+   * @param {SE.Tables.Attribute} attr 
+   */
+  function renderRefAttributes(attr) {
+
+    return createDOM(util.format('<p class="font-sm" title={0}>{1}</p>', attr.name, attr.displayName));
+  }
+
+  function innerRenderAttributeNodes(entityId, refAttrName, wrap, refPath) {
+
+    if (!entityId || !wrap) {
+      jslog('innerRenderAttributeNodes failed');
+      return;
+    }
+
+    var attrs = service.getAttributesByEntityId(entityId);
+
+    if (Array.isArray(attrs)) {
+		//  filter other datatype properties
+		var filterAttrs = attrs.filter(item=>item.datatype=='reference'||item.datatype=='string'||item.datatype=='boolean'||item.datatype=='integer');
+      filterAttrs.forEach(function (attr) {
+        if (attr.datatype === 'reference') {
+          wrap.appendChild(renderTableNode(attr.referenceTable, attr.name, attr.displayName, refPath));
+        }
+        else {
+          wrap.appendChild(renderLeafNode(attr, entityId, refAttrName, refPath));
+        }
+      });
+    }
+    else {
+      var errorMsg = util.format('innerRenderAttributeNodes -> get entity: {0} meta attributes failed', entityId);
+
+      jslog(errorMsg);
+      //alert(errorMsg);
+    }
+  }
+
+  function updateRefAttrTableCell(compositeId) {
+
+    var td = getRefAttributeTableCell(compositeId);
+
+    if (td) {
+
+      td.textContent = '';
+
+      var refAttrs = service.getEnforcedRefAttributesByCompositeId(compositeId);
+      var refAttrCell = refAttrs.map(function (attr) {
+        return renderRefAttributes(attr);
+      });
+
+      refAttrCell.forEach(function (el) {
+        td.appendChild(el);
+      });
+    }
+    else {
+      jslog(util.format('updateRefAttrTableCell failed, compositeId: {0}', compositeId));
+    }
+  }
+
+  //#endregion
+
+  //#region hydrators
+
+  /**
+   * 
+   * @param {SE.APIModel.SNMetaAttriute} model 
+   * @param {string} entityId
+   */
+  function snMetaAttributeHydrator(model, entityId) {
+
+    if (model && entityId) {
+
+      var attr = {
+        id: model.value.slice(entityId.length + 1),
+        name: model.value.slice(entityId.length + 1),
+        displayName: model.label,
+        description: model.title,
+        datatype: model.type,
+        table: entityId,
+        referenceTable: model.reference,
+        isReference: false
+      };
+
+      var compositeId = util.format('{0}:{1}', entityId, attr.id);
+
+      store.attrInfo[compositeId] = attr;
+    }
+    else {
+      jslog('snMetaAttributeHydrator failed, model invalid');
+    }
+  }
+
+  /**
+   * store entity model in the tables
+   * @param {SE.APIModel.NxlMetaEntity} model
+   */
+  function nxlMetaEntityHydrator(model) {
+
+    if (model) {
+
+      var entity = {
+        id: model.internal_name,
+        name: model.internal_name,
+        displayName: model.display_name,
+        description: '',
+        scope: model.scope_name
+      };
+
+      store.entityInfo[entity.id] = entity;
+    }
+    else {
+      jslog('nxlMetaEntityHydrator failed, model invalid');
+    }
+  }
+
+  /**
+   * @deprecated
+   * @param {SE.APIModel.NxlMetaAttribute} model 
+   * @param {string} entityId
+   */
+  function nxlMetaAttributeHydrator(model, entityId) {
+
+    if (model && entityId) {
+
+      var attr = {
+        id: model.column_name,
+        name: model.column_name,
+        displayName: model.column_label,
+        description: '',
+        datatype: model.column_type,
+        table: entityId
+      };
+
+      var compositeId = util.format('{0}:{1}', entityId, attr.id)
+
+      if (!store.attrInfo[compositeId]) {
+        store.attrInfo[compositeId] = attr;
+      }
+    }
+    else {
+      jslog('nxlMetaAttributeHydrator failed, model invalid');
+    }
+  }
+
+  /**
+   * 
+   * @param {SE.APIModel.NxlEnforcedEntity} model 
+   */
+  function nxlEnforcedEntityHydrator(model) {
+
+    if (model) {
+
+      var entity = {
+        id: model.internal_name,
+        name: model.internal_name,
+        displayName: model.display_name,
+        description: '',
+        scope: model.scope_name
+      };
+
+      if (!store.entityInfo[entity.id]) {
+        store.entityInfo[entity.id] = entity;
+      }
+    }
+    else {
+      jslog('nxlEnforcedEntityHydrator failed, model invalid');
+    }
+  }
+
+  /**
+   * @param {SE.APIModel.NxlEnforcedAttribute} model 
+   * @param {string} entityId
+   */
+  function nxlEnforcedAttributeHydrator(model, entityId) {
+
+    if (model && entityId) {
+
+      var attr = {
+        id: model.column_name,
+        name: model.column_name,
+        displayName: model.column_label,
+        description: '',
+        datatype: model.type,
+        table: entityId,
+        isReference: model.is_reference
+      };
+
+      var compositeId = util.format('{0}:{1}', entityId, attr.id)
+
+      if (!store.attrInfo[compositeId]) {
+        store.attrInfo[compositeId] = attr;
+      }
+    }
+    else {
+      jslog('nxlEnforcedAttributeHydrator failed, model invalid');
+    }
+  }
+
+  /**
+   * @param {SE.APIModel.NxlEnforcedAttribute} model 
+   * @param {string} entityId 
+   */
+  function refAttributeHydrator(model, entityId) {
+    if (model && entityId) {
+
+      var compositeId = util.format('{0}:{1}', entityId, model.column_name);
+      var attr = {
+        id: model.column_name,
+        name: model.column_name,
+        displayName: model.column_label,
+        description: '',
+        datatype: model.type,
+        table: entityId,
+        isReference: model.is_reference
+      };
+
+      store.refAttrInfo[compositeId] = attr;
+    }
+    else {
+      jslog(util.format('refAttributeHydrator failed, model: {0}, entityId: {1}', model, entityId))
+    }
+  }
+
+  function entityAttrFetchStatusHydrator(entityId, isFetched) {
+
+    var attrFetchStatus = {
+      id: entityId,
+      isFetched: isFetched,
+    };
+
+    store.entityAttrFetchStatus[entityId] = attrFetchStatus;
+  }
+
+  function entityEnforcerHydrator(entityId, isEnforced) {
+
+    var enforcer = {
+      id: entityId,
+      enforced: isEnforced,
+      willEnforced: isEnforced
+    };
+
+    store.entityEnforcer[entityId] = enforcer;
+  }
+
+  function attrEnforcerHydrator(compositeId, isEnforced) {
+
+    var attrId = compositeId.split(':')[1];
+
+    var enforcer = {
+      id: attrId,
+      enforced: isEnforced,
+      willEnforced: isEnforced
+    };
+
+    store.attrEnforcer[compositeId] = enforcer;
+  }
+
+  function refAttrEnforcerHydrator(compositeId, isEnforced) {
+
+    var attrId = compositeId.split(':')[1];
+
+    var enforcer = {
+      id: attrId,
+      enforced: isEnforced,
+      willEnforced: isEnforced
+    };
+
+    store.refAttrEnforcer[compositeId] = enforcer;
+  }
+
+  /**
+   * store scope model in the tables.
+   * @param {{ scope: string, name: strig }} model
+   */
+  function scopeHydrator(model) {
+
+    if (model) {
+
+      var scope = {
+        id: model.scope,
+        displayName: model.name
+      };
+
+      store.scopeInfo[scope.id] = scope;
+    }
+    else {
+      jslog('scopeHydrator failed, model is null');
+    }
+  }
+  //#endregion
+
+  //#region - dehydrator
+
+  /**
+   * dehydrate data from the entity & its attributes
+   * - return the data dehyrated in a specific format
+   * @param {SE.ViewModel.Entity} entity
+   * @param {SE.ViewModel.Attribute[]} attrs
+   * @return {{ internal_name: string, attributes: { name: string, displayName: string, is_reference: boolean, type: string }[] }}
+   */
+  function entityDehydrator(entity, attrs) {
+    var model = {};
+
+    model.internal_name = entity.id;
+
+    model.attributes = attrs.map(function (attr) {
+      return { name: attr.name, displayName: attr.displayName, is_reference: attr.isReference, type: attr.datatype };
+    });
+
+    return model;
+  }
+  //#endregion
+})();
+//#endregion
+]]></script>
+        <script_name>secure-entities</script_name>
+        <sys_class_name>sys_ui_script</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-11-12 13:01:58</sys_created_on>
+        <sys_id>df9c95c74f9283003ab4e9628110c737</sys_id>
+        <sys_mod_count>422</sys_mod_count>
+        <sys_name>x_230565_emsn.secure-entities</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_ui_script_df9c95c74f9283003ab4e9628110c737</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-03-29 02:41:51</sys_updated_on>
+        <use_scoped_format>false</use_scoped_format>
+    </sys_ui_script>
+</record_update>

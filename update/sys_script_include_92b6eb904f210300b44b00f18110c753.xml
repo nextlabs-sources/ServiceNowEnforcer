@@ -1,0 +1,2314 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>public</access>
+        <active>true</active>
+        <api_name>x_230565_emsn.Enforcer</api_name>
+        <client_callable>false</client_callable>
+        <description>The core module of Enforcer </description>
+        <name>Enforcer</name>
+        <script><![CDATA[///<reference path="./typings/sn-querypc-model.d.ts"/>
+///<reference path="./typings/sn-global.d.ts"/>
+///<reference path="./typings/sn-seutil.d.ts"/>
+
+var Enforcer = Class.create();
+
+Enforcer.ACTION_QUERY = 'QUERY';
+Enforcer.ACTION_INSERT = 'INSERT';
+Enforcer.ACTION_UPDATE = 'UPDATE';
+Enforcer.ACTION_DELETE = 'DELETE';
+
+Enforcer.DECISION_DENY = 'Deny';
+Enforcer.DECISION_ALLOW = 'Permit';
+Enforcer.DECISION_PEND = 'Indeterminate';
+
+Enforcer.userStack; // A variable persisted during the Script Include lifecycle
+
+/** 
+ * Please use GlideRecordSecure wherever possible because using GlideRecordSecure, system will enforce all ACLs and if you use GlideRecord then it won't check for user access control.
+ * @global {GlideRecord}
+ */
+var GlideRecordWihoutACL = x_230565_emsn['Glide' + 'Record'];
+
+Enforcer.prototype = {
+    initialize: function () {},
+
+    /**
+     * The session/user getDomainID() methods are not exposed to scope currently. As a workaround, I'd suggest creating a Script Include with
+     * a method you can call that will create a domain-separated record and just read the domain off of it.
+     * This assumes that the sys_user table is domain-separated. I'd suggest using a domain-separated table which doesn't have Number Maintenance 
+     * or other auto-incrementing stuff, since we are deliberately initializing a full record, but never saving it.
+     * 
+     * Note: `global.gs.getUser().getDomainID()`, `GlideDomainSupport.getCurrentDomainValueOrGlobal()` and  `gs.getSession().getCurrentDomainID()`
+     * are restricted  in scoped application scripts.
+     * Cross-scope privilege record
+     * 
+     * @example var currentDomain = new DomainInfo().getCurrentDomain();
+     * @see https://community.servicenow.com/thread/274879
+     */
+    getCurrentDomain: function () {
+        // var throwAwayRecord = new Glide-Record("sys_user");
+        // throwAwayRecord.newRecord();
+        // return throwAwayRecord.getValue("sys_domain");
+    },
+
+    type: 'Enforcer'
+};
+
+/**
+ * Retrieves the current user attributes getter which is lazily initialized
+ * @param {string} [userId] user ID, which is used once only when the getter hasn't been initialized.
+ * @return {UserStack} user attributes getter
+ * @example var userStack = x_230565_emsn.Enforcer.lazyUserStack();
+
+ */
+Enforcer.lazyUserStack = function (userId) {
+    // var isNew, watchStart = new Date();
+    if (null == Enforcer.userStack) {
+        // first called and import the module (file) PolicyAgent, and subsequent modules can be accessed.
+        PolicyAgent;
+        Enforcer.userStack = new UserStack(userId);
+        // isNew = true;
+    }
+
+    return Enforcer.userStack;
+};
+
+/**
+ * Evaluates the current record, which is the predefined global variable current (prioritizes over the latter if not null) or the last parameter passed in,
+ * based on policy. Note, currently, this method is only called in ACL script.
+ * 
+ * When opening a table in ListView, triggered ACLs are as following:
+ * 
+ * | sys_security_acl.operation | current.sys_id | current.isNewRecord() | current.operation() |
+ * |----------------------------|----------------|-----------------------|---------------------|
+ * | create                     | row_1_id       | false                 | null                |
+ * | create                     | N.A.           | false                 | null                |
+ * | create                     | N.A.           | false                 | null                |
+ * | update                     | N.A.           | false                 | null                |
+ * | delete                     | row_1_id       | false                 | null                |
+ * | read                       | row_1_id       | false                 | null                |
+ * | ...                        | ...            | false                 | null                |
+ * | read                       | row_20_id      | false                 | null                |
+ * 
+ * However, which check of create ACLs does decide whether to show users the "New" button at the top of the list?
+ * 
+ * @public
+ * @param {string} action the Policy XMACL action name, e.g. INCIDENT_QUERY, INCIDENT_UPDATE, INCIDENT_CREATE, INCIDENT_DELETE
+ * @param {GlideRecord} current The GlideRecord to be evaluated, which is the current state of the record being referenced. Note it's a predefined global variable.
+ * @param {('read'|'write'|'create'|'delete')} aclOperation the field operation value of a sys_security_acl record
+ * @returns {boolean} `true` if denied, otherwise `false`.
+ */
+Enforcer.evaluate = function (action, current, aclOperation) {
+    var sequenceId = new Date().valueOf() + '|'; // typeof +new Date() "most likely" a unique number
+    var onlyDoEnforcement = false,
+        updateNewRecordAction = null,
+        currentOperation, url;
+    var userId = gs.getUserID();
+
+    // check record validity
+    if (null == current) {
+        SEUtil.warn('Enforcer.evaluate', sequenceId + 'Allow because current is {0} for userId={1}, action={2}', current, userId, action);
+        return false;
+    } else if (gs.nil(current.getValue('sys_id'))) {
+        // here `('current is {0}', current)` will output table name, equivalent to `current.getTableName()`
+        // SEUtil.debug('Enforcer.evaluate', sequenceId + 'Allow because current.sys_id is nil for userId={0}, action={1}, current={2}, operation={3}', userId, action, current, current.operation());
+
+        if ('create' === aclOperation) {
+            onlyDoEnforcement = true; // After opening list of a table, create acl is triggered.
+        } else {
+            return false;
+        }
+    } else if (current.isNewRecord()) { // `GlideRecord.isNewRecord()` True if the record is new and has not been inserted into the database.
+        /// Check if current record is new one, and if current action is UPDATE or CREATE
+        if ('write' === aclOperation) {
+            currentOperation = current.operation();
+            // SEUtil.info('Enforcer.evaluate', sequenceId + 'Allow because NewRecord@{0}, userId={1}, action={2}, operation={3}', [current.sys_id, userId, action, currentOperation]);
+            return false; // allow
+        } else if ('create' === aclOperation) {
+            onlyDoEnforcement = true; // After clicking "New" button, create acl is triggered.
+        } else if ('read' === aclOperation) {
+            // After users with admin role click "New" button in incident ListView, if the related table "Search Fields" of "Contextual Search - Table Configuration" is not empty,
+            // UI will outputs "Search Service Error: The following fields are configured but cannot be found on the form: Short description [short_description]"
+            return false; // allow
+        }
+    }
+
+    // prints a log about action.glideURI
+    // TODO undocumented [What is "gs.action"?](https://community.servicenow.com/community?id=community_question&sys_id=bca50feddbd8dbc01dcaf3231f961935)
+    // [GlideURI.toString(String basepath)](https://developer.servicenow.com/app.do#!/api_doc?v=istanbul&id=c_GlideURIScopedAPI) available in global and scoped scripts
+    // Reconstructs the URI string and performs the proper URL encoding by converting non-valid characters to their URL code. For example, converting & to '%26'.
+    // Parameters set with the set method are encoded with the URI as well.
+    try {
+        url = gs.action.getGlideURI().toString();
+        // SEUtil.debug('Enforcer.evaluate', sequenceId + 'gs.action.GlideURI = {0} for userId={1}, action={2}', url, userId, action);
+    } catch (err) {
+        // SEUtil.debug('Enforcer.evaluate', sequenceId + 'Failed to get gs.action.GlideURI');
+    }
+
+    // first called and import the module (file) PolicyAgent, and subsequent modules can be accessed.
+    var policyAgent = new PolicyAgent();
+    var entityStack = new EntityStack(current);
+
+    // jie 2018.10.15
+    {
+        var arr = action.split('_');
+        Enforcer.auditingLog(arr[arr.length - 1]);
+    }
+
+
+    return policyAgent.decide(Enforcer.lazyUserStack(userId), action, current); // entityStack
+
+    // return Enforcer.decide(userId, updateNewRecordAction || action, currentOperation);
+};
+
+Enforcer.decide = function (userId, action, currentOperation) {
+    // import module
+    var dummy = CommunicateWithCCAndPC;
+    // unknown, Note if decision is undefined or null, `gs.info('{0}, {1}, {2}', decision, abort, action)` outputs `{0}, {1}, {2}`.
+    var decision = ''; // record the decision of policy and the final decision
+    try {
+        // Query policy based on userId and action.
+        var grPolicy = new GlideRecordSecure('x_230565_emsn_nxl_policies');
+        grPolicy.setLimit(1);
+        grPolicy.addQuery('id', userId);
+        grPolicy.addQuery('action', action);
+        grPolicy.query();
+        if (grPolicy.next()) {
+            var policy = grPolicy.getValue('policy');
+            var handler = {
+                action: action
+            };
+
+            // Classify the returned obligations to a map <obligation name, array of obligations>
+            Enforcer.classifyPolicyObligations(JSON.parse(policy), handler);
+            var obligations = handler.Obligations;
+            decision = handler.Decision;
+
+            if (onlyDoEnforcement) {
+                // don't execute Obligations when create acl is triggered and current record is a new one.
+                // SEUtil.info('Enforcer.evaluate', sequenceId + 'NewRecord@{0}, Decision={1}, action={2}, ignore classified obligation: {3}', current.sys_id, decision, action, obligations);
+            } else {
+                // SEUtil.info('Enforcer.evaluate', sequenceId + 'Decision={0}, classified obligation: {1}', decision, String(JSON.stringify(obligations, null, ' ')));
+                // Execute obligations and decide the effective Decision
+                if (obligations) {
+                    decision = Enforcer.evaluateObligation(obligations, decision, current, sequenceId);
+                }
+            }
+
+        } else {
+            SEUtil.warn('Enforcer.evaluate', sequenceId + 'No policy matched for userId=' + userId + ' (' + gs.getUserName() + '), action=' + action);
+        }
+    } catch (err) {
+        SEUtil.logThrow('Enforcer.evaluate', err);
+    }
+
+    // Decide the final result: deny or not deny based on Decision.
+    var abort = Enforcer.decideUponAbort(decision);
+    SEUtil.info('Enforcer.evaluate', sequenceId + 'evaluated: decision={0}, abort={1}, for {2}@{3}', [decision, abort, action, current.sys_id]);
+    return abort && currentOperation ? currentOperation : abort;
+};
+
+/**
+ * Evaluates current record with the specified action, this function will retrieve user and record attributes via global variable `current` of ServiceNow and
+ * performs evaluation according to ABAC policies and return enforcer result. Note, this method is only called in ACL script.
+ * @public
+ * @param {string} tableOperation Its form is tableName_aclOperation (e.g. incident_create, incident_delete, incident_write, incident_read), case insensitive.
+ * @param {GlideRecord} [current] (Optional) If other than empty, evaluate this given resource, otherwise, evaluate the record specified by the predefined global
+ *  variable `current` in ServiceNow, which is the current state of the record being referenced.
+ * @return {number} Returns the following values depending on the decision result: 
+ * * 0: evaluation result is allow;
+ * * 1: evaluation result is deny;
+ * * 100: evaluation failed;
+ * * 101: invalid parameter
+ * @example var current = new GlideRecordSecure('incident'); current.setLimit(1); current.query();
+ * answer = 0 == x_230565_emsn.Enforcer.EvaluateACL("INCIDENT_READ") ? true : false; // in a Access Control script
+ */
+Enforcer.EvaluateACL = function (tableOperation) {
+    try {
+        var idxUnderscore = tableOperation.lastIndexOf('_');
+        var key = tableOperation.substr(1 + idxUnderscore).toLowerCase();
+        var actionOper, aclOperation;
+        switch (key) {
+            case 'view':
+            case 'read':
+                actionOper = 'VIEW';
+                aclOperation = 'read';
+                break;
+            case 'edit':
+            case 'write':
+                actionOper = 'EDIT';
+                aclOperation = 'write';
+                break;
+            case 'create':
+                actionOper = 'CREATE';
+                aclOperation = 'create';
+                break;
+            case 'delete':
+                actionOper = 'DELETE';
+                aclOperation = 'delete';
+                break;
+            default:
+                break;
+        }
+
+        if (actionOper && aclOperation) {
+            tableOperation = tableOperation.substr(0, idxUnderscore).toUpperCase() + '_' + actionOper;
+            if (1 < arguments.length) {
+                SEUtil.debug('Enforcer.EvaluateACL', 'Use the second parameter passed in: {0}', arguments[1]);
+            } else {
+                SEUtil.debug('Enforcer.EvaluateACL', 'Use the predefined global variable current: {0}', current);
+            }
+            return Enforcer.evaluate(tableOperation, 1 < arguments.length ? arguments[1] : current, aclOperation) ? 1 : 0;
+        } else {
+            return 101;
+        }
+    } catch (error) {
+        SEUtil.logThrow('Enforcer.EvaluateACL', error);
+        return 100; // evaluation failed
+    }
+    // console.log('action:', action, 'aclOperation:', aclOperation);
+};
+
+/**
+ * Enforces the query filter on current resource, which is the predefined global variable current (prioritizes over the latter if not null) or the first parameter passed in.
+ * @public
+ * @param {GlideRecord} [current] The GlideRecord to be evaluated, which is the current state of the record being referenced. Note it's valid only if the global current global is `null`.
+ * @param {*} g_scratchpad The scratchpad object is available on display rules, and is used to pass information to the client to be accessed from client scripts.
+ * @param {GlideSystem} gs References to GlideSystem functions.
+ * @returns whether to abort the next database action, see {@link current.setAbortAction}
+ * @see <a href="https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/script/business-rules/concept/c_UsingPredefinedGlobalVariables.html#conceptutzrhxz4__null">Check for null</a>
+ * @see <a href="https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/script/business-rules/concept/c_UsingPredefinedGlobalVariables.html">Global variables in business rules</a>
+ * @example // This business rule is automatically generated by Enforcer. Do not modify it!
+(function executeRule(current, previous) {
+	gs.debug("[BusinessRuleName]executeRule");
+	x_230565_emsn.Enforcer.EvaluateBR(current);
+})(current, previous);
+
+var gr = new GlideRecordSecure('incident');
+gr.setLimit(1); // gr.addQuery('number','INC0000001');
+// gr.setWorkflow(false);
+gr.query();
+while(gr.next()) {
+    gs.debug('{0}, number={1}', gr.sys_id, gr.getValue('number'));
+    // gr.update();
+}
+
+
+var current = new GlideRecordSecure('incident');
+gs.debug('current.getTableName().toUpperCase()=' + current.getTableName().toUpperCase());
+x_230565_emsn.Enforcer.EvaluateBR(current);
+ */
+Enforcer.EvaluateBR = function () {
+    /** @type {GlideRecord} */
+    var res;
+    // Check for null before using this variable.
+    if (arguments.length) {
+        res = arguments[0];
+        SEUtil.debug('Enforcer.EvaluateBR', 'Use the parameter passed in: {0}', res);
+        if (!res) {
+            SEUtil.info('Enforcer.EvaluateBR', 'the first parameter resource passed in is null, do nothing');
+            return;
+        }
+    } else if (gs.nil(current)) {
+        SEUtil.info('Enforcer.EvaluateBR', 'current is null, do nothing');
+        return;
+    } else {
+        SEUtil.debug('Enforcer.EvaluateBR', 'Use the predefined global variable current: {0}', current);
+        res = current;
+    }
+
+    var actionName = res.getTableName().toUpperCase() + '_VIEW';
+    /** @type {DecisionResult} */
+    var result = new x_230565_emsn.PolicyAgent().decideBusinessRule(actionName, null, res);
+
+    var queryString = Enforcer.buildQueryFilter(result, res);
+
+    SEUtil.debug('Enforcer.EvaluateBR', 'old query strings is {0}, queryString={1}', res.getEncodedQuery(), queryString);
+
+    if (queryString) {
+        // SEUtil.debug('Enforcer.EvaluateBR', 'enforced query strings is {0}', queryString);
+        // Adds a filter to return records using an encoded query string.
+        res.addQuery(queryString); // An encoded query string.
+        // current.addEncodedQuery(filter); // Adds an encoded query to other queries that may have been set.
+    } else if (!result.Allowed) {
+        // 3.1.	Secure by default:
+        // When security enforcement for a business entity is turned on, user shall have no access to any records until explicitly granted by policy.
+
+        // We should restrict access to any records so users will be denied to see any records.
+        // Business rule doesn't support `current.setActionAbort(true);` when query
+
+        res.addQuery('sys_id', '____none____'); // return no record
+
+        //current.setLimit(0);
+        // ServiceNow automatically shows users "No records to display" 
+        SEUtil.debug('Enforcer.EvaluateBR', 'Expect empty record');
+    }
+
+    SEUtil.debug('Enforcer.EvaluateBR', 'new query string is {0}', res.getEncodedQuery());
+};
+
+/** 
+ * This function is used to evaluate record request via passed user/resource key-value pair against policies and returns evaluation result.
+ * @param {string} action Its form is tableName_aclOperation (e.g. incident_create, incident_delete, incident_write, incident_read), case insensitive.
+ * @param {string[]} user A key-value pairs of user attributes, which is the information about a user performing an access. Its component format is "key=value".
+ * @param {string[]} [resource] (Optional) If other than empty, evaluate this given resource, otherwise, evaluate the record specified by the predefined global
+ *  variable `current` in ServiceNow. A key-value pairs in component format "key=value".
+ * @return {number} Returns the following values depending on the decision result: 
+ * * 0: evaluation result is allow;
+ * * 1: evaluation result is deny;
+ * * 100: evaluation failed;
+ * * 101: invalid parameter
+ * @example // Do Attributes Based Access Control according to user-configured policies in a Before-Insert Business rule script triggered
+ * // when a user inserts an incident record in Business rule.
+// A Before-Insert Business rule script example
+(function executeRule(current, previous ) { // null when async
+
+    // Add your code here
+    // var current = new GlideRecordSecure('incident');
+    // current.setLimit(1);
+    // current.query();
+    var user = ["location=US", "department.name=Sales"];
+    //var record = ["secure_level=3", "caller_id.department.name=Sales"];
+    var record = ["ative=true", "priority=2", "caller_id.department.name=Sales"];
+    var retval = x_230565_emsn.Enforcer.Evaluate('incident_insert', user, record);
+    if (1 === retval) { // deny
+        // current.setAbortAction(true);
+        gs.debug('Successfully evaluated but access denied');
+    } else if (0 !== retval) {
+        gs.error('Failed to Evaluate and returned ' + retval);
+    } else {
+        gs.debug('Successfully evaluated and access allowed');
+    }
+})(current, previous);
+ */
+Enforcer.Evaluate = function (action, user, resource) {
+    try {
+        var idxUnderscore = action.lastIndexOf('_');
+        var key = action.substr(1 + idxUnderscore).toLowerCase();
+        var entityName, actionOper, aclOperation;
+        switch (key) {
+            case 'view':
+            case 'read':
+                actionOper = 'VIEW';
+                aclOperation = 'read';
+                break;
+            case 'edit':
+            case 'write':
+                actionOper = 'EDIT';
+                aclOperation = 'write';
+                break;
+            case 'create':
+            case 'insert':
+                actionOper = 'CREATE';
+                aclOperation = 'create';
+                break;
+            case 'delete':
+                actionOper = 'DELETE';
+                aclOperation = 'delete';
+                break;
+            default:
+                break;
+        }
+
+        if (!actionOper || !aclOperation) {
+            return 101;
+        }
+
+        entityName = action.substr(0, idxUnderscore);
+        action = entityName.toUpperCase() + '_' + actionOper;
+
+        // Enforcer.auditingLog(actionOper);
+
+        var resourceStack = 2 == arguments.length ? current : new Enforcer.AttributeStack(resource, entityName.toLowerCase());
+        return new PolicyAgent().decide(new Enforcer.AttributeStack(user), action, resourceStack) ? 1 : 0;
+    } catch (error) {
+        SEUtil.logThrow('Enforcer.Evaluate', error);
+        return 100; // evaluation failed
+    }
+};
+
+/**
+ * This function is used to evaluate record query via passed user/resource key-value pair against policies and returns Query condition for secure filter.
+ * @param {string} table A table name
+ * @param {string[]} user A key-value pairs of user attributes, which is the information about a user performing an access. Its component format is "key=value".
+ * @return {string|number} An [encoded query string](https://docs.servicenow.com/bundle/jakarta-platform-administration/page/use/using-lists/concept/c_EncodedQueryStrings.html)
+ * if successful, otherwise, it will return an error code:
+ * * 100: evaluation failed;
+ * * 101: invalid parameter
+ * @example
+var user = ["name=admin", "email=admin@example.com", "department-name=Finance", "location.city=New York", "location.country=USA", "roles=admin"];
+var queryString = x_230565_emsn.Enforcer.FilterEvaluate('incident', user);
+if ('string' == typeof queryString) {
+    gs.debug('queryString is ' + queryString);
+    var gr = new GlideRecordSecure('incident');
+    gr.addQuery(queryString);
+    gr.query();
+    while (gr.next()) {
+        // your code goes here
+        gs.debug(gr.getClassDisplayValue() + '.' + gr.getDisplayValue() + '@' + gr.sys_id);
+    }
+} else {
+    gs.error('Failed to Evaluate {0}', queryString);
+}
+ * @see https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideRecordScoped/concept/c_GlideRecordScopedAPI.html#r_ScopedGlideRecordAddQuery_String
+ */
+Enforcer.FilterEvaluate = function (table, user) {
+    if (table && user) {
+        try {
+            // Enforcer.auditingLog(actionOper);
+            var action = table.toUpperCase() + '_VIEW';
+            // var resourceStack = 2 == arguments.length ? current : new Enforcer.AttributeStack(resource, table.toLowerCase());
+            var resourceStack = new Enforcer.AttributeStack(null, table.toLowerCase());
+            var userStack = new Enforcer.AttributeStack(user);
+            /** @type {DecisionResult} */
+            var result = new x_230565_emsn.PolicyAgent().decideBusinessRule(action, userStack);
+            var queryString = Enforcer.buildQueryFilter(result, resourceStack);
+            return queryString || ''; // null != queryString ? queryString : 100;
+        } catch (error) {
+            SEUtil.logThrow('Enforcer.FilterEvaluate', error);
+            return 100; // evaluation failed
+        }
+    }
+    return 101; // invalid parameter
+};
+
+/**
+ * Determine if a record meets a specified set of requirements
+ * @param {{field: string, operator: string, value: Object}[][]} obFilters classified record_filter obligations
+ * @param {GlideRecord} gr The GlideRecord to be evaluated.
+ * @return {boolean} `true` when the current record meets the filter conditions.
+ * @see https://developer.servicenow.com/app.do#!/api_doc?v=kingston&id=r_ScopedGlideFilterCheckRecord_GlideRecord_String_Object GlideFilter.checkRecord(GlideRecord gr, String filter, Object matchAll)
+ */
+Enforcer.checkRecord = function (obFilters, gr, sequenceId) {
+    // Here, we use top-level OR conditions, which work in the manner (A and B) or (C and D).
+    // The field comparasions under the same obligation are used together as a condition set and they are AND'ed to evaluate.
+    // Then, those condition sets of different obligations re OR'ed to evaluate.
+    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_Operators#Short-circuit_evaluation
+
+    for (var idx = 0, len = obFilters.length; idx < len; ++idx) {
+        var andComparasions = obFilters[idx];
+        var subConds = [];
+        var subResult = true;
+        for (var jdx = 0, count = andComparasions.length; jdx < count; ++jdx) {
+            var subCmp = andComparasions[jdx];
+
+            var entityField = new EntityField(gr.getTableName());
+            if (!entityField.isValidField(subCmp.field)) {
+                SEUtil.error('Enforcer.checkRecord', sequenceId + '{0} not exists in table {1}', subCmp.field, gr.getTableName());
+                return false;
+            }
+            var encodedCmp = entityField.buidEncodedCondition(subCmp, gr, true);
+            // SEUtil.debug('Enforcer.checkRecord', 'Encoded comparison: {0}', encodedCmp);
+            if (!encodedCmp) { // invalid or comparison with NULL
+                subResult = false;
+                // Unexpected behavior of terrible ServiceNow, `var idx = 0; ++idx; gs.debug('{0}', [idx]);` will output "1.0"
+                // SEUtil.debug('Enforcer.checkRecord', '{0}field filter {1}-{2}: false (caused by invalid) checking {3}@{4}', [sequenceId, idx, jdx, gr.getTableName(), gr.sys_id]);
+                break;
+            }
+            subConds.push(encodedCmp);
+        }
+        if (subResult) {
+            // The method returns true when the record meets the filter condition. If the filter is composed of one or more "AND" conditions for example
+            // "active=true^number=abc^category=request" and the matchAll parameter is set to false, then if any of the conditions is true then true is
+            // returned. If the matchAll parameter is true, then all conditions in the filter must be true in order to return true.
+            var filter = subConds.join('^');
+            subResult = GlideFilter.checkRecord(gr, filter, true);
+            // SEUtil.info('Enforcer.checkRecord', sequenceId + 'field filter obligation ' + idx + ': ' + subResult + ' checking record@' + gr.sys_id + ' with condition ' + filter);
+            // `true || (anything)` is short-circuit evaluated to `true`.
+            if (subResult) {
+                return true;
+            }
+        }
+    }
+    return false;
+};
+
+/**
+ * Execute obligations and decide the effective Decision
+ * @param {Object.<string, object[]>} obligations Classified obligations, format: {xxObligationName: [params]}
+ * @param {String} decision the initial decision of the queried Policy
+ * @param {GlideRecord} current The GlideRecord to be evaluated.
+ * @return {Boolean} the effective Decision
+ */
+Enforcer.evaluateObligation = function (obligations, decision, current, sequenceId) {
+    // Allow owner to view or edit records of his own.
+    if (Enforcer.checkOwnerAlwaysAllow(obligations, current)) {
+        // gs.getUserDisplayName() returns the name field of the current user (e.g. John Smith, as opposed to smith). 
+        // gs.getUserName() returns current logged in user's name (e.g. jsmith).
+        // See https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/GlideSystem/concept/c_GlideSystemAPI.html#ariaid-title63
+        var userName = gs.getUserName(),
+            sysCreatedBy = current.getValue('sys_created_by');
+        // SEUtil.info('Enforcer.evaluate', sequenceId + 'Evaluate OwnerAlwaysAllow: userName={0}, sys_created_by={1}, sys_id={2}', userName, sysCreatedBy, current.sys_id);
+        if (userName == sysCreatedBy) return Enforcer.DECISION_ALLOW;
+    }
+
+    // Security Filter obligations
+    var obFilters = obligations.record_filter;
+    if (obFilters && obFilters.length) {
+        var matched = Enforcer.checkRecord(obFilters, current, sequenceId);
+        if (!matched) {
+            decision = Enforcer.getOppositeDecision(decision);
+        }
+    }
+    return decision;
+};
+
+/**
+ * Judge whether do before bussiness rule according to the url.
+ * @param tblName The table(entity) name this before business rule trigged.
+ * @return {boolean}, true means execute the before business rule.
+ * @public a static function shared by each dymanically created business rules.
+ * Only in these two scenarios, return true.
+ * 1. list entity url whic begain with entity name: "incident_list.do?active=true&sysparm_query=active=true^EQ&sysparm_userpref_module=4fed4395c0a8016400fcf06c2"
+ * 2. entity activity stream url which contain "list_history&table=": "angular.do? action=get_set_entries&include_attachments=&p=active%3dtrue%5eEQ&sysparm_auto_Enforceruest=true&sysparm_silent_Enforceruest=true&sysparm_timestamp=&sysparm_type=list_history&table=incident"
+ * 3. entity overview url: "xmlhttp.do?is_portal=true&sysparm_processor=SingleScoreRunProcessor&sysparm_Enforceruest_params=
+%7b%22sysparm_table%22%3a%22incident%22%2c%22sysparm_aggregate%22%3a%22COUNT%22%2c%22sysparm_sumfield%22%3a%22business_duration%22%2c%22s
+ysparm_query%22%3a%22active%3dtrue%5epriority%3d1%5eGROUPBYactive%5eTRENDBYactivity_due%2cyear%22%2c%22sysparm_interactive_report%22%3a
+%22%22%2c%22sysparm_report_drilldown%22%3a%22%22%2c%22sysparm_report_id%22%3a%22995ea851d7030200eaae68150e610360%22%2c%22syspa
+rm_score_color%22%3a%2265b30395a9fe3dba003277a7b660b5db%22%2c%22sysparm_chart_title_color%22%3a%2265b30218a9fe3dba0
+120df8611520d97%22%2c%22sysparm_homepage_sysid%22%3a%2296d42051d7030200eaae68150e6103b3%22%2c%22sysparm_chart_backg
+round_color%22%3a%2265b303c7a9fe3dba00629aff95ee3597%22%2c%22sysparm_list_ui_view%22%3a%22%22%2c%22sysparm_decimal_pr
+ecision%22%3a%220%22%2c%22sysparm_report_source_id%22%3a%22d94d6f62d7632100b96d45a3ce6103d2%22%2c%22sysparm_is_report
+_source_filter_already_combined%22%3atrue%2c%22sysparm_show_zero%22%3a%22true%22%7d&sysparm_scope=global&sysparm_timer=1517474854204"
+ * 4. Table EST API: /api/now/table/{tableName}, /api/now/v1/table/{tableName}, or /api/now/v2/table/{tableName}
+ * 5.report_viewer.do?jvar_report_id=&ni.nolog.x_referer=ignore&show_empty=false&sysparm_additional_groupby=&sysparm_direct=true&sysparm_field=&sysparm_field_list=number%2cshort_description%2cauthor%2ckb_category%2cworkflow_state%2csys_updated_on&sysparm_full_query=&sysparm_inline_embed=true&sysparm_interactive_report=&sysparm_processor=&sysparm_query=&sysparm_report_designer_builder=true&sysparm_report_source_id=&sysparm_scope=global&sysparm_table=kb_knowledge&sysparm_type=list&sysparm_view=&x_referer=sys_report_template.do%3fsysparm_create%3dtrue
+ * 6.api/now/globalsearch/search?api=api&sysparm_groups=2b77ce594bd6c0d901b8fbe25ceff671&sysparm_search=INC0000002
+ * 7.text_search_exact_match.do?sysparm_search=xxx
+ * 8.overview graph
+ * 9.anther global search:textsearch.do?sysparm_ck
+ * 10.group by one column(pie or bar graph):xmlhttp.do?0.ni.nolog.x_referer=ignore&0.sysparm_processor=
+ * ChartDataProcessor&0.sysparm_request_params=%7b%22report_uuid%22%3a%22builder%22%2c%22title%22%3a%22%22%2c%22
+ * display_grid%22%3a%22false%22%2c%22other_threshold%22%3a%22-2%22%2c%22show_empty%22%3a%22false%22%2c%22
+ * table%22%3a%22incident%22%2c%22group_by%22%3a%22short_description%22%2c%22filter%22%3a%22%22%2c%22aggregate%22%3a%22COUNT%22%2c%22
+ *......
+ */
+Enforcer.beforeReadBRJudge = function (tblName) {
+    var result = false,
+        url;
+
+    try {
+        url = gs.action.getGlideURI().toString();
+        SEUtil.info('Enforcer.beforeReadBRJudge', 'gs.action.GlideURI = {0}, table = {1}', url, tblName);
+        // return true; // Also support business rules generated by old versions
+        // return 0 > url.indexOf('sysparm_obj_list='); // always return true unless it contains 'sysparm_obj_list='.
+        return 0 > url.indexOf('&sysparm_name=proceedWithDeleteFromList') || 0 > url.indexOf('&sysparm_processor=DeleteRecordAjax');
+    } catch (err) {
+        SEUtil.warn('Enforcer.beforeReadBRJudge', 'InternalException: failed to get gs.action.GlideURI when table = {0}', tblName);
+        return true;
+    }
+
+    if (0 == url.indexOf(tblName) || -1 != url.indexOf("list_history&table=" + tblName) ||
+        -1 != url.indexOf("sysparm_aggregate%22%3a%22COUNT") || (0 == url.indexOf("report_viewer.do") && -1 != url.indexOf("sysparm_table=" + tblName))) {
+        result = true;
+    }
+    //overview graph
+    if (0 == url.indexOf("home.do?sysparm_view=new_" + tblName + "_overview")) {
+        result = true;
+    }
+    if (0 == url.indexOf("text_search_exact_match.do?sysparm_search")) {
+        result = true;
+    }
+    if (0 == url.indexOf('api/now/')) {
+        var idxQ = url.indexOf('?');
+        if (-1 === idxQ) idxQ = url.length;
+        result = (url.indexOf(tblName) + tblName.length) == idxQ;
+    }
+    if (0 == url.indexOf("api/now/globalsearch/search")) {
+        result = true;
+    }
+    if (0 == url.indexOf("textsearch.do?sysparm_ck")) {
+        result = true;
+    }
+    // group by one clumn(export to bar or pie graph)
+    if (-1 != url.indexOf("table%22%3a%22" + tblName) && -1 != url.indexOf("group_by")) {
+        result = true;
+    }
+    return result;
+};
+
+/**
+ * The callback function when a record is is queried.
+ * When allowed by policy (and with filter in policy), users will be able to see records is allowed, otherwise, users can't see anything.
+ * @param {GlideRecord} current The current state of the record being referenced. Check for null before using this variable.
+ * @param {GlideRecord} previous It must be null. 
+ * @return {boolean|undefined}
+ * @public a static function shared by each dymanically created business rules
+ */
+Enforcer.beforeRead = function (current, previous) {
+    if (null != current) { // to prevent null pointer exceptions. 
+        var bizScopeName = gs.getCallerScopeName(); // global, x_snc_donow, ...
+        SEUtil.trace('Enforcer.beforeRead', 'Table is {0}, operation is {1}; callerScopeName={2}, currentScopeName={3}',
+            current.getTableName(), current.operation(), bizScopeName, gs.getCurrentScopeName());
+
+        var abort;
+        try {
+            // When a table is queried, current.operation() returns empty!!
+            var decision = Enforcer.talkToPC(Enforcer.ACTION_QUERY, bizScopeName);
+            abort = Enforcer.decideUponAbort(decision);
+        } catch (err) {
+            SEUtil.logThrow('Enforcer.beforeRead', err);
+            abort = Enforcer.decideUponAbort();
+        }
+
+        // restrict access to any records
+        if (abort) {
+            //Business rule doesn't support `current.setActionAbort(true);` when query
+            //bug 47866
+            current.addQuery('sys_id', '____none____'); //return no record
+
+            //current.setLimit(0);
+            // ServiceNow automatically shows users "No records to display" 
+            SEUtil.trace('Enforcer.beforeRead', 'Expect empty record');
+        }
+        return abort;
+    } else {
+        SEUtil.warn('Enforcer.beforeRead', 'current is null; callerScopeName={0}, currentScopeName={1}',
+            gs.getCallerScopeName(), gs.getCurrentScopeName());
+    }
+};
+
+/**
+ * Process when insert or update. Those are Global variable.
+ * 
+ *  The Table field (sys_script.collection) and the field Application (sys_script.sys_scope) of the Business Rule must be in the same scope??
+ *  Otherwise, some API will fail. For example: 
+ *  ERROR UI message: Access to api 'setAbortAction' from scope 'x_123456_myapp' has been refused due to the api's cross-scope access policy
+ *  Cause is that the scopes of Business Rule and Script Include in which this function exist differs, that is, gs.getCallerScopeName() != gs.getCurrentScopeName()
+ *
+ *  Sets a flag to indicate if the next database action (insert, update, delete) is to be aborted
+ *  current.setAbortAction(true);
+ *
+ * @param {GlideRecord} current The current state of the record being referenced. Check for null before using this variable.
+ * @param {GlideRecord} previous The state of the referenced record prior to any updates made during the execution context, 
+ *  where the execution context begins with the first update or delete operation and ends after the script and any referenced
+ *  business rules are executed. If multiple updates are made to the record within one execution context, previous will continue
+ *  to hold the state of the record before the first update or delete operation. Available on update and delete operations only.
+ *  Not available on asynch operations. Check for null before using this variable.
+ * @param {*} g_scratchpad The scratchpad object is available on display rules, and is used to pass information to the client to be accessed from client scripts.
+ * @param {GlideSystem} gs References to GlideSystem functions.
+ * @returns whether to abort the next database action, see {@link current.setAbortAction}
+ * @see <a href="https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/script/business-rules/concept/c_UsingPredefinedGlobalVariables.html#conceptutzrhxz4__null">Check for null</a>
+ * @see <a href="https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/script/business-rules/concept/c_UsingPredefinedGlobalVariables.html">Global variables in business rules</a>
+ * @public a static function shared by each dymanically created business rules
+ */
+Enforcer.beforeWrite = function (current, previous) {
+    if (null != current) { // to prevent null pointer exceptions. 
+        var bizScopeName = gs.getCallerScopeName(); // global, x_snc_donow, ...
+        SEUtil.trace('Enforcer.beforeWrite', 'Table is {0}, operation is {1}; callerScopeName={2}, currentScopeName={3}',
+            current.getTableName(), current.operation(), bizScopeName, gs.getCurrentScopeName());
+
+        // When a table is queried, current.operation() returns empty!!
+        var operation = current.operation(),
+            action;
+        if ('insert' === operation) {
+            action = Enforcer.ACTION_INSERT;
+        } else if ('update' === operation) {
+            action = Enforcer.ACTION_UPDATE;
+        } else if ('delete' === operation) {
+            action = Enforcer.ACTION_DELETE;
+        } else {
+            SEUtil.warn('Enforcer.beforeWrite', 'current operation "' + operation + '" is not supported');
+            return Enforcer.decideUponAbort();
+        }
+
+        try {
+            var decision = Enforcer.talkToPC(action, bizScopeName);
+            return Enforcer.decideUponAbort(decision);
+        } catch (err) {
+            SEUtil.logThrow('Enforcer.beforeWrite', err);
+        }
+    } else {
+        SEUtil.warn('Enforcer.beforeWrite', 'current is null; callerScopeName={0}, currentScopeName={1}',
+            gs.getCallerScopeName(), gs.getCurrentScopeName());
+    }
+
+    return Enforcer.decideUponAbort();
+};
+
+/**
+ * Decide whether to abort (Do enforcement: Allow or Deny, of which we focus now on Deny) based on decision returned by PC. Note, in order to implement `Deny`,
+ * when `current.operation()` is one of insert, update, delete, you need `current.setAbortAction(true);`, otherwise, `current.setLimit(0);` to return an empty record.
+ * @param {('Permit'|'Deny')} [decision]
+ * @param {boolean} [abort] if `null == abort` , it will be decided by default policy decision
+ */
+Enforcer.decideUponAbort = function (decision, abort) {
+    if (Enforcer.DECISION_DENY === decision) {
+        abort = true;
+    } else if (Enforcer.DECISION_ALLOW === decision) {
+        abort = false;
+    } else {
+        // PolicyDecision PolicyMsg PolicyDefaultMsg
+        var defaultDecision = SEUtil.getProperty('PolicyDecision'); // 'Allow', 'Deny', null
+        SEUtil.info('Enforcer.decideUponAbort', 'Based on default settings, defaultDecision=' + defaultDecision);
+        if ('Allow' == defaultDecision) {
+            abort = false;
+        } else {
+            // We consider `decision` is `null` if an exception is thrown or it's unset (causes: bad network, response doesn't contain the field `decision`, ...)
+            // and `decision` is neither DENY nor ALLOW returned by PC.
+            // gs.addErrorMessage(SEUtil.getProperty(null != decision ? 'PolicyDefaultMsg' : 'PolicyMsg', 'Default Policy Message'));
+            abort = true;
+        }
+    }
+    return abort;
+};
+
+/**
+ * Determines whether the `gs.action.getGlideURI().toString()` starts with `tableName` or not
+ * 
+ * Info Message: Execute operation on API 'ScopedGlideSystem' from scope 'Compliance Enforcement' was granted and added to 'Compliance Enforcement' cross scope privileges
+ * Info Message: Execute operation on API 'GlideURI.toString' from scope 'Compliance Enforcement' was granted and added to 'Compliance Enforcement' cross scope privileges
+ * 
+ * @param {string} tableName the table name to check whether it's `tableName`_list.do or `tableName`.do
+ * @return {boolean}
+ * @example gs.debug(Enforcer.isActionURIOnTable('incident'))
+ * @public a static function shared by each dymanically created business rules
+ */
+Enforcer.isActionURIOnTable = function (tableName) {
+    var bRet = false;
+    if (gs.action) {
+        var actionGlideURI = gs.action.getGlideURI();
+        if (actionGlideURI) {
+            actionGlideURI = actionGlideURI.toString();
+            bRet = 0 == actionGlideURI.indexOf(tableName);
+        }
+        SEUtil.info('Enforcer.isActionURIOnTable', 'actionGlideURI = {0}, table = {1}, result = {2}', actionGlideURI, tableName, bRet);
+    }
+    return bRet;
+};
+
+/**
+ * construct Enforceruest, parse response, execute obligation, and return enforcement decision but haven't done enforcement yet.
+ * @param {string} action {@link Enforcer.ACTION_INSERT}, {@link Enforcer.ACTION_DELETE}, {@link Enforcer.ACTION_UPDATE}, {@link Enforcer.ACTION_QUERY}
+ * @return {string|undefined} decision {@link Enforcer.DECISION_DENY}, {@link Enforcer.DECISION_ALLOW}, {@link Enforcer.DECISION_PEND}
+ */
+Enforcer.talkToPC = function (action, bizScopeName) {
+    var dummy = CommunicateWithCCAndPC;
+
+    // construct Enforceruest 
+    var jpcRequest = new JPCRequest();
+
+    var objUser = {};
+    var user = gs.getUser();
+    var name = user.getName();
+    var id = user.getID();
+    //SEUtil.info('Enforcer.talkToPC', 'CEUser: sid={0}, name={1}, ceaction={2}', id, name, action);
+    var ceAttrsOfUser = Enforcer.getCEAttributesOfUser(id, objUser);
+    var ceUser = new CEUser(id, name, ceAttrsOfUser);
+    jpcRequest.Set_User(ceUser);
+
+    var ceAttrsOfRes;
+    if (Enforcer.ACTION_UPDATE === action) {
+        // Bug 47948 - Able to update the value of enforced attribute on knowledge entity
+        ceAttrsOfRes = EntityField.buildCEAttribute(previous);
+    } else if (Enforcer.ACTION_QUERY != action) {
+        ceAttrsOfRes = EntityField.buildCEAttribute(current);
+    } else {
+        ceAttrsOfRes = new CEAttres();
+    }
+    // Note, when using the functionality Export on a table, we cannot get its `gs.action.getGlideURI()` and `gs.getSession().getClientIP()` (they are `null`). I think the cause is that the business rule is triggered by a background process (AsyncTask) (gs.isInteractive() = true)
+    // ceAttrsOfRes.Add_Attre('interactive', gs.isInteractive(), 'boolean');
+    ceAttrsOfRes.Add_Attre('session-ip', gs.getSession().getClientIP(), CEAttributeType.XACML_IpAddress);
+
+    var ceRes = new CEResource('current', current.getTableName(), ceAttrsOfRes);
+    jpcRequest.Set_Source(ceRes);
+
+    var ceAction = current.getTableName().toUpperCase() + '_' + action;
+    jpcRequest.Set_Action(ceAction);
+
+    var EnforceruestObj = TransformToSingleRequest(jpcRequest);
+    var EnforceruestBody = JSON.stringify(EnforceruestObj, null, ' ');
+    // SEUtil.trace('Enforcer.talkToPC', 'EnforceruestBody={0}', EnforceruestBody);
+
+    var handlers = [{
+        action: action,
+        user: objUser
+    }];
+    var responseBody = Enforcer.send(EnforceruestBody, bizScopeName);
+
+    if (responseBody) {
+        Enforcer.parseResponse(responseBody, handlers);
+
+        // if (handlers.length) {}
+        var handler = handlers[0];
+        //SEUtil.trace('Enforcer.talkToPC', 'Decision={0}, classified obligation: {1}', handler.Decision, String(JSON.stringify(handler.Obligations, null, ' ')));
+        Enforcer.executeObligation(handler, current, previous);
+        return handler.Decision;
+    }
+};
+
+/**
+ * send the Enforceruest
+ * @param {string} body the content of Enforceruest body
+ * @param {string} bizScopeName caller's scope name `gs.getCallerScopeName`: rhino.global, x_snc_donow, ...
+ * @param {boolean} retried whether we have sent the Enforcer request again
+ */
+Enforcer.send = function (body, bizScopeName, retried) {
+    // record the execution time
+    var gdtBGN = new GlideDateTime(),
+        gdtEND, elapsedMs;
+
+    var result, timeoutMs = 3000,
+        global = 'rhino.global' === bizScopeName;
+    try {
+        var url = CommunicateWithCCAndPC.getPc();
+        var token_type = 'Bearer';
+        var access_token = TokenOAuthCC.getToken(global);
+
+        // gs.info('Enforcer.send|url = ' + url + ', access_token = ' + access_token);
+
+        var Enforceruest = new sn_ws.RESTMessageV2(); //Might throw exception if message doesn't exist or not visible due to scope.
+
+        // https://docs.servicenow.com/bundle/istanbul-servicenow-platform/page/app-store/dev_portal/API_reference/RESTMessageV2/reference/RMV2-setLogLevel_S.html
+        // https://community.servicenow.com/community/develop/developer-relations/blog/2016/12/13/outbound-http-Enforceruest-logging-in-detail
+        // Enforceruest.setLogLevel('all'); // basic, elevated, or all (Request body & Response body). System Logs -> Outbound HTTP Requests
+        Enforceruest.setEndpoint(url);
+        Enforceruest.setHttpMethod('POST');
+        Enforceruest.setRequestHeader('Content-Type', 'application/json');
+        Enforceruest.setRequestHeader('Service', 'EVAL');
+        Enforceruest.setRequestHeader('Version', '1.0');
+        Enforceruest.setRequestHeader("Authorization", token_type + ' ' + access_token);
+        Enforceruest.setRequestBody(body);
+
+        Enforceruest.setHttpTimeout(timeoutMs); // Number timeoutMs
+
+        SEUtil.info('Enforcer.send', 'EnforceruestBody = {0}, global={1} ({2})', Enforceruest.getRequestBody(), global, bizScopeName);
+
+        var response = global ? Enforceruest.execute() : Enforceruest.executeAsync();
+
+        // waitForResponse(Number timeoutSecs); The amount of time, in seconds, to wait for this response.
+        // Set the amount of time the instance waits for a response from the web service provider.
+        //This method overrides the property `glide.rest.outbound.ecc_response.timeout` for this REST response.
+        // response.waitForResponse(60);
+
+        // [Unable to make async rest Enforceruest from a before business rule?](https://community.servicenow.com/thread/179343)
+        if (response.haveError()) {
+            // Except for "javax.net.ssl.SSLPeerUnverifiedException: peer not authenticated", other are considered as a failure.
+            var errmsg = response.getErrorMessage(); // `response.getBody()` also returns this error message.
+            SEUtil.error('Enforcer.send', 'errcode=' + response.getStatusCode() + ', errmsg=' + errmsg);
+            if (401 == response.getStatusCode()) { // https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401 Unauthorized
+                // Method failed: (/dpc/authorization/pdp) with code: 401 - Invalid username/password combo ". 
+                if (!retried) {
+                    TokenOAuthCC.forceRefreshToken();
+                    return Enforcer.send(body, bizScopeName, true);
+                } else {
+                    SEUtil.error('Enforcer.send', 'HTTP status is 401 (Unauthorized) again, but we won\'t second retry, it\'s considered an error');
+                }
+            } else if (0 <= errmsg.indexOf('TimeoutException')) {
+                //e.g. java.net.SocketTimeoutException: connect timed out when posting to https://122.225.229.110/cas
+
+            } else if (0 <= errmsg.indexOf('UnknownHostException')) { // Connection unreachable
+
+            } else if (0 > errmsg.indexOf('javax.net.ssl.SSLPeerUnverifiedException')) {
+
+                // `errmsg` may be "org.apache.commons.httpclient.HttpException: SSLPeerUnverifiedException" or "javax.net.ssl.SSLPeerUnverifiedException"
+
+                /// Certificate Trust: By default, ServiceNow trusts a certificate's Certificate Authority (CA). This ensures ServiceNow
+                // accepts self-issued certificates. You must set the system property `com.glide.communications.trustmanager_trust_all`
+                // to false. If you do not set the property false, the instance trusts any certificate.
+                // gs.debug(gs.getProperty('com.glide.communications.trustmanager_trust_all'));
+                // gs.setProperty('com.glide.communications.trustmanager_trust_all', true); // This code must mount in scope `gloabl,
+                // otherwise, Security restricted: Access to property 'some property' from scope 'Your App' has been refused due to the 
+                // property's cross-scope access policy.
+
+                // other cases: e.g 
+                // if Endpoint is https://1.2.3.4, errmsg is "Socket error"
+                // if Endpoint is https://1.2.3.4/cas/token, errmsg is "Connection timed out 6000 ms"
+            }
+        } else {
+            result = response.getBody();
+            SEUtil.debug('Enforcer.send', 'Response: status = ' + response.getStatusCode() + ', body=' + result);
+        }
+    } catch (ex) {
+        SEUtil.logThrow('Enforcer.send', ex);
+    } finally {
+        gdtEND = new GlideDateTime();
+        elapsedMs = GlideDateTime.subtract(gdtBGN, gdtEND); //the difference between gdtStart and gdtEnd
+
+        SEUtil.debug('Enforcer.send', 'Elapsed time in milliseconds is {0} from {1}.{2} to {3}.{4}, TZOffset in milliseconds is ' + gdtBGN.getTZOffset(),
+            elapsedMs.getByFormat('HH:mm:ss.SSS'), gdtBGN.getDisplayValue(), gdtBGN.getNumericValue() % 1000, gdtEND.getDisplayValue(), gdtEND.getNumericValue() % 1000);
+    }
+    return result;
+};
+
+/**
+ * Classify Obligations of a single evaluated result
+ * @param {{Decision: string, Status: {StatusMessage: string, StatusCode: {Value: string}}, Obligations: [{Id: string, AttributeAssignment: {AttributeId: string, Value: [], Category: string, DataType: string}}]}} result the evaluated result from PC 
+ * @param {Object} handler The single evaluated result handler to output
+ * @param {string} handler.Decision valid values are "Permit" (Allow by policy), "Deny" (Deny by policy), "DontCare" (No policy matched, no need care), or "Indeterminate"
+ * @param {string} handler.StatusCode e.g. "urn:oasis:names:tc:xacml:1.0:status:ok", "urn:oasis:names:tc:xacml:1.0:status:missing-attribute"
+ * @param {Object.<string, object[]>} handler.Obligations if returned obligations are empty, it is unset. e.g. {xxObligation: [{paramA: valueA}, {paramA: valueA}], record_filter: [[{}, {}], [{}]] }
+ * @return {Boolean} false if StatusCode is not OK
+ */
+Enforcer.classifyPolicyObligations = function (result, handler) {
+    handler.Decision = result.Decision;
+
+    var statusCode = result.Status.StatusCode.Value;
+    handler.StatusCode = statusCode;
+
+    if (RestResponseStatus.Status_Ok != statusCode) {
+        SEUtil.error('Enforcer.parseResponse', 'Failed with StatusCode not OK');
+        return false;
+    }
+
+    var resObligations = result.Obligations; // returned obligations in response
+    if (!resObligations.length) {
+        SEUtil.debug('Enforcer.parseResponse', 'Returned obligations are empty');
+        return true;
+    }
+    var classified = {};
+    handler.Obligations = classified;
+
+    for (var jdx = 0; jdx < resObligations.length; jdx++) {
+
+        var resOb = resObligations[jdx],
+            obId = resOb.Id;
+        var obHandler = Enforcer.Obligation[obId];
+
+        if ('function' == typeof obHandler) {
+
+            var obligation = classified[obId];
+
+            if (!obligation) {
+                obligation = [];
+                classified[obId] = obligation;
+            }
+            try {
+                var params = obHandler(resOb, handler);
+                if (null != params) {
+                    obligation.push(params);
+                }
+            } catch (err) {
+                var stack = err.stack || err.stacktrace || 'no stack info';
+                SEUtil.warn('Enforcer.parseResponse', 'Skip obligations[{0}] (Id={1}), because a parsing error occured: {2} \n {3}',
+                    jdx, obId, err.message, stack);
+            }
+        } else {
+            SEUtil.warn('Enforcer.parseResponse', 'Skip unsupported obligations[{0}] (Id={1})', jdx, obId);
+        }
+    }
+    return true;
+};
+
+/**
+ *
+ * @param {string} responseBody the content of the REST response body. 
+ *  [RESTResponseV2 - getBody()](https://docs.servicenow.com/bundle/istanbul-servicenow-platform/page/app-store/dev_portal/API_reference/RESTResponseV2/reference/r_RESTResponseV2-getBody.html).
+ * e.g. 
+ * ```
+ * {
+ *     "Response": {
+ *         "Result": [
+ *             {
+ *                 "Decision": "Permit",
+ *                 "Status": {
+ *                     "StatusMessage": "success",
+ *                     "StatusCode": { "Value": "urn:oasis:names:tc:xacml:1.0:status:ok" }
+ *                 },
+ *                 "Obligations": [
+ *                     {
+ *                         "Id": "record_filter",
+ *                         "AttributeAssignment": [
+ *                             {
+ *                                 "AttributeId": "field1",
+ *                                 "Value": [ "sys_created_by" ],
+ *                                 "Category": "urn:nextlabs:names:evalsvc:1.0:attribute-category:obligation-attrAssignment",
+ *                                 "DataType": "http://www.w3.org/2001/XMLSchema#string"
+ *                             }
+ *                         ]
+ *                     }]
+ *             }
+ *         ]
+ *     }
+ * }
+ * {
+ *     "Response": {
+ *         "Result": [
+ *             {
+ *                 "Decision": "Indeterminate",
+ *                 "Status": {
+ *                     "StatusMessage": "Error occurred in JSON data parsing. [ id is null ]",
+ *                     "StatusCode": { "Value": "urn:oasis:names:tc:xacml:1.0:status:processing-error" }
+ *                 }
+ *             }
+ *         ]
+ *     }
+ * }
+ * {
+ *     "Response": {
+ *         "Result": [{
+ *             "Decision": "NotApplicable",
+ *             "Status": {
+ *                 "StatusMessage": "Not Applicable",
+ *                 "StatusCode": {
+ *                     "Value": "urn:oasis:names:tc:xacml:1.0:status:ok"
+ *                 }
+ *             },
+ *             "Obligations": []
+ *         }]
+ *     }
+ * }
+ * ```
+ * @param {object[]} handlers
+ * @param {object} handlers[].Enforceruest
+ * @param {string} handlers[].Decision valid values are "Permit" (Allow by policy), "Deny" (Deny by policy), "DontCare" (No policy matched, no need care), or "Indeterminate"
+ * @param {string} handlers[].StatusMessage e.g. "success"
+ * @param {string} handlers[].StatusCode e.g. "urn:oasis:names:tc:xacml:1.0:status:ok", "urn:oasis:names:tc:xacml:1.0:status:missing-attribute"
+ * @param {Object.<string, object[]>} handlers[].Obligations if returned obligations are empty, it is unset. e.g. {xxObligation: [{paramA: valueA}, {paramA: valueA}], record_filter: [[{}, {}], [{}]] }
+ */
+Enforcer.parseResponse = function (responseBody, handlers) {
+
+    var json = JSON.parse(responseBody);
+
+    if (json.Response) {
+
+        var resultArr = json.Response.Result;
+
+        if (!resultArr || !resultArr.length) {
+            SEUtil.error('Enforcer.parseResponse', 'Failed with an empty Response.Result');
+            return;
+        }
+
+        var resultLength = resultArr.length;
+
+        for (var idx = 0; idx < resultLength; idx++) {
+            Enforcer.classifyPolicyObligations(resultArr[idx], handlers[idx]);
+        }
+        return true;
+    } else {
+        if (json.Error && json.Error.Message) {
+            SEUtil.error('Enforcer.parseResponse', json.Error.Message);
+        } else {
+            SEUtil.error('Enforcer.parseResponse', 'Failed with an empty Response');
+        }
+    }
+    return false;
+};
+
+/**
+ * Check the parameter value of the obligation OwnerAlwaysAllow, but only the first one is valid if multiple parameters exist
+ * @param {Object.<string, object[]>} obligations a map of obligation name and an array of obligation parameters
+ * @param {GlideRecord} current
+ * @returns {boolean} `true` if the obligation OwnerAlwaysAllow exists
+ */
+Enforcer.checkOwnerAlwaysAllow = function (obligations, current) {
+    // Allow owner to view or edit records of his own.
+    var ownerAlwaysAllow = obligations.OwnerAlwaysAllow;
+    if (ownerAlwaysAllow) {
+        // only the first is valid
+        if (ownerAlwaysAllow.length > 1) {
+            SEUtil.warn('Enforcer.checkOwnerAlwaysAllow', 'Only the first OwnerAlwaysAllow is valid');
+        }
+
+        if (ownerAlwaysAllow[0]) {
+            // gs.debug(new GlideRecordSecure('incident').isValidField('sys_created_by'));
+            if (current.isValidField('sys_created_by')) {
+                return true;
+            } else {
+                SEUtil.warn('Enforcer.checkOwnerAlwaysAllow', 'Omit OwnerAlwaysAllow is not supported on the table {0}', current.getTableName());
+            }
+        }
+    }
+    return false;
+};
+
+/**
+ * Builds an encoded query
+ * 
+ * Always test queries on a sub-production instance prior to deploying them on a production instance. An
+ * incorrectly constructed encoded query, such as including an invalid field name, produces an invalid query.
+ * When the invalid query is run, the invalid part of the query condition is dropped, and the results are based
+ * on the valid part of the query, which may return all records from the table. Using an `insert()`, `update()`,
+ * `deleteRecord()`, or `deleteMultiple()` method on bad query results can result in data loss.
+ * 
+ * You can set the `glide.invalid_query.returns_no_rows` system property to true to have queries with invalid
+ * encoded queries return no records.
+ * 
+ * @param {Object.<string, object[]>} obligations a map of obligation name and an array of obligation parameters
+ * @param {GlideRecord} current
+ * @returns {string} an encoded query string, otherwise null
+ * @see GlideRecord.addQuery(query)
+ * @see GlideRecord.addEncodedQuery(encodedQueryString)
+ * @see https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/use/using-lists/concept/c_EncodedQueryStrings.html
+ */
+Enforcer.buildQueryFilter = function (obligations, current) {
+    var idx, ilen, jdx, jlen, filter = [],
+        ignoredCondNum = 0;
+    /** @type {{field: string, operator: string, value: Object}[][]} */
+    var recordFilters = obligations.record_filter;
+    if (recordFilters && recordFilters.length) {
+        // The condition builder uses two different types of OR conditions: top-level and dependent.
+        // [OR conditions](https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/use/using-lists/concept/c_UsingORConditions.html)
+        // Here, we use top-level OR conditions, which work in the manner (A and B) or (C and D).
+        // The field comparasions under the same obligation are AND'ed and are used together as a condition set.
+        // Then, those condition sets of different obligations are separated by a top-level OR condition.
+
+        var fieldChecker = new EntityField(current.getTableName()),
+            nonstringTypes;
+        for (idx = 0, ilen = recordFilters.length; idx < ilen; ++idx) {
+
+            var andConditions = recordFilters[idx];
+            var subCond = [];
+
+            for (jdx = 0, jlen = andConditions.length; jdx < jlen; ++jdx) {
+                var cond = andConditions[jdx],
+                    encoded;
+
+                if (!fieldChecker.isValidField(cond.field)) {
+                    // {0} does not exists or is not secured in table {1}. The field {0} is selected to secure in table {1}
+                    var logmsg = gs.getMessage('{0} not exist or not secured in table {1}', [cond.field, current.getTableName()]);
+                    gs.addErrorMessage(logmsg);
+                    obligations.Allowed = false;
+                    return SEUtil.error('Enforcer.buildQueryFilter', logmsg);
+                }
+
+                encoded = fieldChecker.buidEncodedCondition(cond, current);
+
+                // // [is (dynamic)](https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/use/using-lists/task/t_DynamicFilterOptions.html)
+                // // value is a filed name of Users [sys_user] but must be configured in UserAttributes. e.g. department.name
+                // if ('ISUSER' == oper || 'ISNOTUSER' == oper) {
+                //     val = handler.user[cond.value];
+                //     if (undefined == val) {
+                //         SEUtil.warn('Enforcer.buildQueryFilter', 'skip unsupported record filter {0} {1} {3} ({4})', name, oper, cond.value, val);
+                //         continue;
+                //     }
+                //     SEUtil.debug('Enforcer.buildQueryFilter', 'user filter {0} {1} {3} ({4})', name, oper, cond.value, val);
+                //     oper = 'ISUSER' == oper ? '=' : '!=';
+                // } else {
+                //     val = cond.value;
+                // }
+                if (encoded) {
+                    subCond.push(encoded);
+                } else {
+                    ++ignoredCondNum;
+                    SEUtil.warn('Enforcer.buildQueryFilter', 'Conditions[{0}][{1}] ({2} {3} {4}) is incomplete', idx, jdx, cond.field, cond.operator, cond.value);
+                }
+            }
+            if (subCond.length) {
+                filter.push(subCond.join('^'));
+            } // Maybe all conditions of the filter obligation are invalid.
+        }
+    }
+
+    // Allow owner to view records of his own.
+    if (Enforcer.checkOwnerAlwaysAllow(obligations, current)) {
+        filter.push('sys_created_by=' + gs.getUser().getName());
+    }
+
+    if (filter.length) {
+
+        // Check User Filter e.g. active=true^ORDERBYDESCnumber, active=true, ORDERBYDESCnumber
+        // active=false^urgency=1^NQbusiness_service=281a4d5fc0a8000b00e4ba489a83eedc^EQ^ORDERBYDESCnumber
+        var strUserFilter = current.getEncodedQuery();
+
+        SEUtil.trace('Enforcer.buildQueryFilter', 'user query string: {0}', strUserFilter);
+
+        // If it doesn't contains any top-level OR conditions and only one obligation Apply Security Filter. 
+        if (filter.length > 0 && 0 > strUserFilter.indexOf('^NQ')) {
+            var idxOrderBy = strUserFilter.indexOf('ORDERBY'),
+                userCondition;
+            if (0 > idxOrderBy) {
+                if (strUserFilter.length) { // e.g. active=true
+                    userCondition = strUserFilter;
+                }
+            } else if (1 < idxOrderBy) { // e.g. active=true^ORDERBYDESCnumber
+                userCondition = strUserFilter.substr(0, idxOrderBy - 1);
+            }
+            if (userCondition) {
+                userCondition += '^';
+                // Prefix user filter condition to every OR condition of our business rule filter (ANDed with every sub-condition).
+                var tmpFilter = [filter[0]];
+                for (idx = 1; idx < filter.length; ++idx) {
+                    tmpFilter.push(userCondition + filter[idx]);
+                }
+                filter = tmpFilter;
+            }
+        }
+
+        // [An encoded query string](https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/use/using-lists/concept/c_EncodedQueryStrings.html)
+        var filterString = filter.join('^NQ');
+        SEUtil.trace('Enforcer.buildQueryFilter', 'build filter query string: {0}', filterString);
+        return filterString;
+    } else if (ignoredCondNum) {
+        return '';
+    }
+};
+
+/**
+ * Executes the obligations returned by PC. Note that after doing some obligations, `handler.Decision` will be changed.
+ * @param {object} handler current handler to enforce policy from PC.
+ * @param {Object.<string, object[]>} handler.obligations {xxObligationName: [params]}
+ * @param {string} handler.Decision determine the decision
+ * @param {string} handler.user a map of key-value pairs for field names of the table `UserAttribute`
+ * @param {GlideRecord} current 
+ * @param {GlideRecord} previous 
+ */
+Enforcer.executeObligation = function (handler, current, previous) {
+
+    var idx, jdx, len, count; // loop variables
+    var obligations = handler.Obligations;
+
+    if (!obligations) {
+        gs.info('Enforcer.executeObligation', 'Classified obligations are empty!');
+        return;
+    }
+
+    if (Enforcer.ACTION_QUERY == handler.action) {
+
+        var queryString = Enforcer.buildQueryFilter(obligations, current);
+
+        if (queryString) {
+            // Adds a filter to return records using an encoded query string.
+            // gs.error("leo:querystring:" + queryString);
+            current.addQuery(queryString); // An encoded query string.
+
+            // Adds an encoded query to other queries that may have been set.
+            // current.addEncodedQuery(filter);
+
+            SEUtil.trace('Enforcer.executeObligation', 'aggregated query string: {0}', current.getEncodedQuery());
+        } else if ('' != queryString) {
+            // Users will be denied to see any records {@link Enforcer.beforeRead}
+            // 3.1.	Secure by default: 
+            // When security enforcement for a business entity is turned on, user shall have no access to any records until explicitly granted by policy.
+            handler.Decision = Enforcer.DECISION_DENY;
+        }
+    } else {
+
+        // 3.7.	ServiceNow Enforcer shall control update on secured entity field at cell level. 
+
+        /** @type {{field: string, operator: string, value: Object}[][]} */
+        var fieldFilters = obligations.record_filter;
+
+        if (fieldFilters && fieldFilters.length) {
+
+            // Here, we use top-level OR conditions, which work in the manner (A and B) or (C and D).
+            // The field comparasions under the same obligation are used together as a condition set and they are AND'ed to evaluate.
+            // Then, those condition sets of different obligations re OR'ed to evaluate.
+            // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_Operators#Short-circuit_evaluation
+
+            /** @type {boolean} */
+            var result = false;
+            for (idx = 0, len = fieldFilters.length; idx < len; ++idx) {
+
+                var andComparasions = fieldFilters[idx];
+                var subComparasion = [];
+                /** @type {boolean} */
+                var subResult = true;
+
+                for (jdx = 0, count = andComparasions.length; jdx < count; ++jdx) {
+
+                    subComparasion = andComparasions[jdx];
+
+                    /** @type {string} */
+                    var leftValue = SEUtil.derefGet(current, subComparasion.field);
+                    /** @type {string} */
+                    var operator = subComparasion.operator;
+                    /** @type {string} */
+                    var rightValue = subComparasion.value;
+
+                    // value is a filed name of current table. e.g. For the table Incidents [incident], caller_id.department.name
+                    if ('NSAMEAS' == operator || 'SAMEAS' == operator) {
+                        rightValue = SEUtil.derefGet(current, rightValue);
+                        if (undefined != rightValue) {
+                            rightValue = SEUtil.toString(rightValue);
+                        }
+                    }
+
+                    if (undefined == leftValue && undefined == rightValue) { //both not found
+                        subResult = false;
+                    } else {
+                        if (undefined != leftValue) {
+                            leftValue = SEUtil.toString(leftValue);
+                        }
+
+                        if ('=' == operator || 'SAMEAS' == operator) {
+                            subResult = leftValue === rightValue;
+                        } else if ('!=' == operator || 'NSAMEAS' == operator) {
+                            subResult = leftValue !== rightValue;
+                        } else {
+                            subResult = false;
+                        }
+                    }
+
+                    SEUtil.trace('Enforcer.executeObligation', 'field filter {0}-{1}: {2} from eval {3} {4} {5} with leftValue = {6}, rightValue = {7}',
+                        [idx.toString(), jdx.toString(), subResult, subComparasion.field, subComparasion.operator, subComparasion.value, leftValue, rightValue]);
+
+                    // `false && (anything)` is short-circuit evaluated to `false`.
+                    if (!subResult) {
+                        break;
+                    }
+                }
+
+                // `true || (anything)` is short-circuit evaluated to `true`.
+                if (subResult) {
+                    result = true;
+                    break;
+                }
+            }
+
+            // users are allowed to configure allow/deny policy
+            //by default, allow policies are recommended.
+            if (!result) {
+                handler.Decision = Enforcer.getOppositeDecision(handler.Decision);
+            }
+            //handler.Decision = result ? Enforcer.DECISION_DENY : Enforcer.DECISION_ALLOW;
+        }
+
+        // Allow owner to edit records of his own.
+        // Scoped GlideUser - getName() Returns the user ID, or login name, of the current user.
+        if (Enforcer.checkOwnerAlwaysAllow(obligations, current) && current.getValue('sys_created_by') === gs.getUserName()) {
+            handler.Decision = Enforcer.DECISION_ALLOW;
+        }
+    }
+
+    if (handler.Decision === Enforcer.DECISION_DENY) {
+        if (obligations.AlertMsg) {
+            var AlertMsg = obligations.AlertMsg;
+            for (idx = 0, len = AlertMsg.length; idx < len; ++idx) {
+                var message = AlertMsg[idx];
+                if (message)
+                    gs.addInfoMessage(message);
+            }
+        }
+    }
+};
+
+Enforcer.getOppositeDecision = function (decision) {
+
+    if (decision === Enforcer.DECISION_ALLOW) {
+        return Enforcer.DECISION_DENY;
+    } else if (decision === Enforcer.DECISION_DENY) {
+        return Enforcer.DECISION_ALLOW;
+    } else {
+        return Enforcer.DECISION_DENY;
+    }
+};
+
+/// Define the base class `Obligation` and define its implemention classes and put them as property of the object `Obligation`
+
+Enforcer.Obligation = {};
+
+// Enforcer.Obligation = Class.create();
+// Enforcer.Obligation.prototype = {
+//     initialize: function (obJson) {
+//         gs.debug('Obligation.initialize: obJson = {0}', JSON.stringify(obJson));
+//         var attrAssigns = obJson.AttributeAssignment; // AttrbuteAssignment[]
+//         var params = {};
+//         for (var propName in attrAssigns) { // aa property names
+//             var attrAss = attrAssigns[propName]; // AttrbuteAssignment
+//             // gs.debug('AttributeAssignment property: {0} = {1}', propName, attrAss);
+//             var attAssId = attrAss.AttributeId;
+//             params[attAssId] = attrAss.Value[0];
+//         }
+//         this.params = params;
+//     },
+
+//     type: 'Obligation'
+// };
+
+// /**
+//  * @param {string} id unique indetify
+//  * @param {object.<string, function>} methods 
+//  */
+// Enforcer.registerObligation = function (id, methods) {
+//     var ob = Class.create();
+//     ob.prototype = Object.extendsObject(Enforcer.Obligation, methods);
+//     Enforcer.Obligation[id] = ob;
+//     return ob;
+// };
+
+/**
+ * Parse respond obligations and return the array of {field: string, operator: string, value: string}  
+ * @param {object} obJson
+ * 
+ * Obligation UI of a policy in web console,
+ *  Olbigations:
+ *   RecordFilter Obligation
+ *    Field 1  : ________
+ *    Operator : ________
+ *    Value    : ________
+ *    ...             
+ *    Field N  : ________
+ *    Operator : ________
+ *    Value    : ________
+ *   RecordFilter Obligation
+ *    Field 1  : ________
+ *    Operator : ________
+ *    Value    : ________
+ *    ...             
+ *    Field N  : ________
+ *    Operator : ________
+ *    Value    : ________
+ * 
+ * we regard RecordFilter obligations as AND conditions and the fieldN, operN, valueN in every obligation are appended as OR condition to an existing Glide QueryCondition. 
+ * buid query looks like (RecordFilter Obligation) AND (RecordFilter Obligation) AND ... where, RecordFilter Obligation is (field1 oper1 value1) OR (field2 oper2 value2) OR ...
+ * And respond json format is as following:
+ * {
+ *	 "Id": "record_filter",
+ *	 "AttributeAssignment": [
+ *		 {
+ *			 "AttributeId": "field1",
+ *			 "Value": [ "sys_created_by" ],
+ *			 "Category": "urn:nextlabs:names:evalsvc:1.0:attribute-category:obligation-attrAssignment",
+ *			 "DataType": "http://www.w3.org/2001/XMLSchema#string"
+ *		 },
+ *	     {
+ *			 "AttributeId": "oper1",
+ *			 "Value": [ "=" ],
+ *			 "Category": "urn:nextlabs:names:evalsvc:1.0:attribute-category:obligation-attrAssignment",
+ *			 "DataType": "http://www.w3.org/2001/XMLSchema#string"
+ *		 },
+ *	     {
+ *			 "AttributeId": "value1",
+ *			 "Value": [ "admin" ],
+ *			 "Category": "urn:nextlabs:names:evalsvc:1.0:attribute-category:obligation-attrAssignment",
+ *			 "DataType": "http://www.w3.org/2001/XMLSchema#string"
+ *		 }
+ *	 ]
+ * }
+ * @return {{field: string, operator: string, value: string}[]} named parameters object of the obligation
+ */
+Enforcer.Obligation.record_filter = function (obJson) {
+    var params = Enforcer.mapObParams(obJson),
+        conditions = [];
+    for (var idx = 1; idx <= 6; ++idx) {
+        var field = params['field' + idx];
+        if (field) {
+            var oper = params['oper' + idx]; // FIXME validate operator: =, !=, ...
+            if (!oper) oper = '=';
+            var value = params['value' + idx];
+            conditions.push({
+                field: field,
+                operator: oper,
+                value: value
+            });
+        }
+    }
+    if (conditions.length) {
+        return conditions;
+    }
+};
+
+/**
+ * Parse respond obligation named parameters object. e.g. {OwnerAlwaysAllow: true}  
+ * @param {object} obJson
+ * 
+ * Obligation UI of a policy in web console,
+ *  Olbigations:
+ *   Always Allow Owner
+ *    Always Allow Owner : ________ True/False
+ * e.g. {
+ *	 "Id": "OwnerAlwaysAllow",
+ *	 "AttributeAssignment": [
+ *		 {
+ *			 "AttributeId": "OwnerAlwaysAllow",
+ *			 "Value": [ 'True' ],
+ *			 "Category": "urn:nextlabs:names:evalsvc:1.0:attribute-category:obligation-attrAssignment",
+ *			 "DataType": "http://www.w3.org/2001/XMLSchema#string"
+ *		 }
+ *	 ]
+ * }
+ * @returns {boolean} named parameters object of the obligation
+ */
+Enforcer.Obligation.OwnerAlwaysAllow = function (obJson) {
+    var params = Enforcer.mapObParams(obJson);
+    return 'True' === params.OwnerAlwaysAllow;
+};
+
+/**
+ * Parse respond obligation named parameters object. e.g. {OwnerAlwaysAllow: true}  
+ * @param {object} obJson
+ * 
+ * Obligation UI of a policy in web console,
+ *  Olbigations:
+ *   Alert Message
+ *    Message : ________
+ * e.g. {
+ *	 "Id": "AlertMsg",
+ *	 "AttributeAssignment": [
+ *		 {
+ *			 "AttributeId": "Msg",
+ *			 "Value": [ "$user.sys_user.name is denied. (sent from joe)" ],
+ *			 "Category": "urn:nextlabs:names:evalsvc:1.0:attribute-category:obligation-attrAssignment",
+ *			 "DataType": "http://www.w3.org/2001/XMLSchema#string"
+ *		 }
+ *	 ]
+ * }
+ * @param {Object} handler
+ * @param {Object.<string, string>} handler.user e.g. {"company.name": "Acer", "department.name": "Finance", "roles": "admin", "vip": "false"}
+ * @returns {string} named parameters object of the obligation
+ */
+Enforcer.Obligation.AlertMsg = function (obJson, handler) {
+    var params = Enforcer.mapObParams(obJson);
+
+    // gs.info('Enforcer.Obligation.AlertMsg|' + JSON.stringify(handler.user, null, ' '));
+
+    var sourcePrefix = 'user.';
+    var targetPrefix = 'target.';
+    var tablePrefix = 'sys_user.';
+    var compositePrefix = sourcePrefix + tablePrefix;
+    var attrReg = /\$([0-9a-zA-Z._\-]+)/gi;
+
+    var alertMsg = params.Msg;
+
+    if (typeof alertMsg === 'string') {
+
+        var userId = gs.getUserID();
+        var curUser = new GlideRecordSecure('sys_user');
+
+        curUser.addQuery('sys_id', userId);
+        curUser.query();
+
+        while (curUser.next()) {
+            break;
+        }
+
+        alertMsg = alertMsg.replace(attrReg, function (match, placeholder) {
+
+            var propName = placeholder.substring(placeholder.indexOf(sourcePrefix) + sourcePrefix.length);
+            var propValue = '';
+
+            if (curUser) {
+                propValue = SEUtil.derefGet(curUser, propName, '-');
+            } else {
+                SEUtil.error('Enforcer.Obligation.AlertMsg', 'AlertMsg getUser failed, user id: {0}', userId);
+            }
+
+            return propValue;
+        });
+
+    }
+    return alertMsg;
+};
+
+
+Enforcer.queryValue = function (tblName, queries) {
+
+    var records = [];
+    var record = new GlideRecordSecure(tblName);
+
+    if (queries) {
+
+        for (var key in queries) {
+            if (Object.prototype.hasOwnProperty.call(queries, key)) {
+                record.addQuery(key, queries[key]);
+            }
+        }
+
+        record.query();
+
+        while (record.next()) {
+            records.push(record);
+        }
+    }
+
+    return records;
+};
+
+/** Convert 
+ * {
+ *	 "Id": "secure_field",
+ *	 "AttributeAssignment": [
+ *		 {
+ *			 "AttributeId": "field",
+ *			 "Value": [ "sys_created_by" ],
+ *			 "Category": "urn:nextlabs:names:evalsvc:1.0:attribute-category:obligation-attrAssignment",
+ *			 "DataType": "http://www.w3.org/2001/XMLSchema#string"
+ *		 },
+ *	     {
+ *			 "AttributeId": "outmsg",
+ *			 "Value": [ "your are not allowed to update it" ],
+ *			 "Category": "urn:nextlabs:names:evalsvc:1.0:attribute-category:obligation-attrAssignment",
+ *			 "DataType": "http://www.w3.org/2001/XMLSchema#string"
+ *		 }
+ *	 ]
+ * } to {field: 'sys_created_by', outmsg: 'your are not allowed to update it' }
+ * @param {{Id: string, AttributeAssignment: [{ AttributeId: string, Value:string[], Category: string, DataType: string }]}} obJson a Javascript object
+ * @return {object.<string, string>} a named parameters map object
+ */
+Enforcer.mapObParams = function (obJson) {
+    var aas = obJson.AttributeAssignment,
+        aa, tmpmap = {};
+    for (var aapn in aas) { // aa property names
+        aa = aas[aapn]; // AttrbuteAssignment
+        tmpmap[aa.AttributeId] = aa.Value[0];
+    }
+    return tmpmap;
+};
+
+/**
+ * Retrieves the CE attributes from current user by UserAttributes.
+ * @param {string} userId user id
+ * @param {Object<string, string>} outUser if not null, it will hold all non-nil values of UserAttributes
+ */
+Enforcer.getCEAttributesOfUser = function (userId, outUser) {
+    var userDict = SEUtil.getProperty('UserAttributes');
+    var ceAttrs = new CEAttres();
+    // gs.nil(Object o): Queries an object and returns true if the object is null, undefined, or contains an empty string.
+    if (gs.nil(userDict) && !userDict.length) {
+        return ceAttrs;
+    }
+    userDict = JSON.parse(userDict);
+
+    // gs.debug('UserGetter.getCEAttributesOfUser|' + JSON.stringify(userDict, null, ' '));
+
+    var SN_TBL_USER = 'sys_user';
+    // var prefixLen = 'sys_user.'.length;
+    var grUser = new GlideRecordSecure(SN_TBL_USER);
+    if (!grUser.get(userId || gs.getUserID())) {
+        return ceAttrs;
+    }
+    for (var idx = 0, len = userDict.length; idx < len; ++idx) {
+        var userAttr = userDict[idx];
+
+        if ('name' === userAttr.column_name || !userAttr.active) continue; // we have added it as name of CEUser
+
+        var fieldName = userAttr.column_name; // userAttr.column_name.substr(prefixLen);
+        var value = SEUtil.derefGet(grUser, fieldName, '-');
+
+        // // value: undefined, xx string, , ...
+        //if (SEUtil.isArray(value)) { //org.mozilla.javascript.NativeArray
+        //    value = value.toString(); // or value.join(',')
+        //} else if(!value.nil()){}
+        if (!gs.nil(value)) {
+            value = value.toString();
+        }
+
+        // gs.info('[-_^]USER: {0} = {1}', fieldName, value);
+        if (!gs.nil(value)) {
+
+            if (outUser) {
+                outUser[fieldName] = value;
+            }
+
+            var ceAttrType = userAttr.type;
+            switch (ceAttrType) {
+                case 'boolean':
+                    ceAttrType = CEAttributeType.XACML_Boolean;
+                    break;
+                case 'number':
+                    ceAttrType = Math.floor(value) === value ? CEAttributeType.XACML_Integer : CEAttributeType.XACML_Double;
+                    break;
+                default:
+                    ceAttrType = CEAttributeType.XACML_String;
+                    break; // throw 'unsupported currently';
+            }
+            if (ceAttrType) {
+                // gs.info('[-_^]CEAttribute {0} ({1}) = {2}', fieldName, ceAttrType, value);
+                ceAttrs.Add_Attre(userAttr.column_name, value, ceAttrType); // userAttr.column_name is "sys_user.SomeFieldName"
+            }
+        }
+    }
+    return ceAttrs;
+};
+
+// jie auditing log
+/*
+action
+Enforcer.ACTION_QUERY = 'QUERY';
+Enforcer.ACTION_INSERT = 'INSERT';
+Enforcer.ACTION_UPDATE = 'UPDATE';
+Enforcer.ACTION_DELETE = 'DELETE';*/
+Enforcer.auditingLog = function (action) {
+    if (current == null) {
+        return;
+    }
+    var dummy = CommunicateWithCCAndPC;
+
+    // construct Enforceruest 
+    var jpcRequest = new JPCRequest();
+
+    var user = gs.getUser();
+    var name = user.getName();
+    var id = user.getID();
+    //SEUtil.info('Enforcer.talkToPC', 'CEUser: sid={0}, name={1}, ceaction={2}', id, name, action);
+    var ceAttrsOfUser = Enforcer.lazyUserStack(id).toCEAttributes();
+    var ceUser = new CEUser(id, name, ceAttrsOfUser);
+    jpcRequest.Set_User(ceUser);
+
+    var ceAttrsOfRes;
+    /*
+    if (Enforcer.ACTION_UPDATE === action) {
+        // Bug 47948 - Able to update the value of enforced attribute on knowledge entity
+        ceAttrsOfRes = EntityField.buildCEAttribute(previous);
+    } else if (Enforcer.ACTION_QUERY != action) {
+        ceAttrsOfRes = EntityField.buildCEAttribute(current);
+    } else {
+        ceAttrsOfRes = new CEAttres();
+    }*/
+    ceAttrsOfRes = EntityField.buildCEAttribute(current);
+
+    // Note, when using the functionality Export on a table, we cannot get its `gs.action.getGlideURI()` and `gs.getSession().getClientIP()` (they are `null`). I think the cause is that the business rule is triggered by a background process (AsyncTask) (gs.isInteractive() = true)
+    // ceAttrsOfRes.Add_Attre('interactive', gs.isInteractive(), 'boolean');
+    // comment the session ip
+	//ceAttrsOfRes.Add_Attre('session-ip', gs.getSession().getClientIP(), CEAttributeType.XACML_IpAddress);
+    //add EMSN prefix
+    var ceRes = new CEResource('current', 'emsn_'+current.getTableName(), ceAttrsOfRes);
+    jpcRequest.Set_Source(ceRes);
+
+    var ceAction = current.getTableName().toUpperCase() + '_' + action;
+    jpcRequest.Set_Action(ceAction);
+
+    var EnforceruestObj = TransformToSingleRequest(jpcRequest);
+    var EnforceruestBody = JSON.stringify(EnforceruestObj, null, ' ');
+    // SEUtil.trace('Enforcer.talkToPC', 'EnforceruestBody={0}', EnforceruestBody);
+    gs.debug("EnforceruestBody:"+EnforceruestBody);
+    Enforcer.asyncSend(EnforceruestBody);
+};
+
+/**
+ * send the Enforceruest
+ * @param {string} body the content of Enforceruest body
+ * @param {string} bizScopeName caller's scope name `gs.getCallerScopeName`: rhino.global, x_snc_donow, ...
+ * @param {boolean} retried whether we have sent the Enforcer request again
+ */
+Enforcer.asyncSend = function (body) {
+    // record the execution time
+    var gdtBGN = new GlideDateTime(),
+        gdtEND, elapsedMs;
+
+    var result, timeoutMs = 3000,
+        global = true;
+    try {
+        var url = CommunicateWithCCAndPC.getPc();
+        var token_type = 'Bearer';
+        var access_token = TokenOAuthCC.getToken(global);
+
+        // gs.info('Enforcer.send|url = ' + url + ', access_token = ' + access_token);
+
+        var Enforceruest = new sn_ws.RESTMessageV2(); //Might throw exception if message doesn't exist or not visible due to scope.
+
+        // https://docs.servicenow.com/bundle/istanbul-servicenow-platform/page/app-store/dev_portal/API_reference/RESTMessageV2/reference/RMV2-setLogLevel_S.html
+        // https://community.servicenow.com/community/develop/developer-relations/blog/2016/12/13/outbound-http-Enforceruest-logging-in-detail
+        // Enforceruest.setLogLevel('all'); // basic, elevated, or all (Request body & Response body). System Logs -> Outbound HTTP Requests
+        Enforceruest.setEndpoint(url);
+        Enforceruest.setHttpMethod('POST');
+        Enforceruest.setRequestHeader('Content-Type', 'application/json');
+        Enforceruest.setRequestHeader('Service', 'EVAL');
+        Enforceruest.setRequestHeader('Version', '1.0');
+        Enforceruest.setRequestHeader("Authorization", token_type + ' ' + access_token);
+        Enforceruest.setRequestBody(body);
+
+        Enforceruest.setHttpTimeout(timeoutMs); // Number timeoutMs
+
+
+        Enforceruest.executeAsync();
+    } catch (ex) {
+        SEUtil.logThrow('Enforcer.send', ex);
+    } finally {
+        gdtEND = new GlideDateTime();
+        elapsedMs = GlideDateTime.subtract(gdtBGN, gdtEND); //the difference between gdtStart and gdtEnd
+
+        SEUtil.debug('Enforcer.send', 'Elapsed time in milliseconds is {0} from {1}.{2} to {3}.{4}, TZOffset in milliseconds is ' + gdtBGN.getTZOffset(),
+            elapsedMs.getByFormat('HH:mm:ss.SSS'), gdtBGN.getDisplayValue(), gdtBGN.getNumericValue() % 1000, gdtEND.getDisplayValue(), gdtEND.getNumericValue() % 1000);
+    }
+    return result;
+};
+
+
+/// class EntityField begins
+
+/**
+ * `EntityField` is used for secured entity fields.
+ * @param {string} tableName entity name, it is also a table name. e.g. incident, kb_knowledge
+ * @example gs.debug(new EntityField('incident').isValidField('active'));  
+ *  var dummy = Enforcer;  
+ *  var field = new EntityField('incident');  
+ *  // gs.debug(JSON.stringify(field.dict));  
+ *  gs.debug(field.isValidField('business_service.name'));
+ */
+function EntityField(tableName) {
+    //     var grs = new GlideRecordSecure(SEUtil.MY_SCOPE_NAME + '_entitycolumn'), fieldDict2 = {};
+    //     grs.addQuery('name', tableName);
+    //     grs.query();
+    //     while (grs.next()) {
+    // 		SEUtil.debug('EntityField', 'grs.column=' + grs.column + ', grs.getValue(\'column\')=' + grs.getValue('column')); 
+    //         if (!gs.nil(grs.column)) {
+    //             // fieldArray.push(gr.column.toString());
+    //             fieldDict2[grs.column.toString()] = grs.getValue('type');
+    //         }
+    //     }
+    // 	SEUtil.debug('EntityField', 'fieldDict2={0}', JSON.stringify(fieldDict2));
+
+    // Retrieves all field names of a specific entity.
+    var gr = new GlideRecordWihoutACL(SEUtil.MY_SCOPE_NAME + '_entitycolumn'),
+        fieldDict = {},
+        fieldName;
+    gr.addQuery('name', tableName);
+    gr.query();
+    while (gr.next()) {
+        fieldName = gr.getValue('column');
+        // SEUtil.debug('EntityField', 'gr.column=' + gr.column + ', fieldName=' + fieldName); 
+        if (!gs.nil(gr.column)) fieldDict[fieldName] = gr.getValue('type');
+    }
+    // SEUtil.debug('EntityField', 'fieldDict={0}', JSON.stringify(fieldDict)); 
+    this.dict = fieldDict;
+}
+
+EntityField.prototype = {
+    /**
+     * Determines if the specified field is defined in the current entity. 
+     * @param {string} fieldName Name of a field.
+     * @returns {boolean} True if the field is valid, false otherwise.
+     */
+    isValidField: function (fieldName) {
+        return fieldName in this.dict;
+    },
+
+    /**
+     * Retrieves the field type of the specified field name.
+     * @param {string} fieldName Name of a field.
+     * @returns {string} The field type
+     */
+    getType: function (fieldName) {
+        return this.dict[fieldName];
+    },
+
+    /**
+     * Retrieves the encoded query filter string for a specific filed
+     * @param {{field: string, operator: string, value: string}} cond the named parameters of the obligation Apply Security Filter
+     * @param {GlideRecord} current 
+     * @param {Boolean} checkNil returns `''` if `true` and converted ServiceNow operator is not ISEMPTY and not ISNOTEMPTY, and field type is number-like.
+     * @returns {string} the field encoded query filter string. it may return empty string if condition is invalid or checkNil is true.
+     */
+    buidEncodedCondition: function (cond, current, checkNil) {
+        var name = cond.field; // field name
+        var oper = EntityField.OPERATORS[cond.operator] || cond.operator; // corresponding field operator how we compare  
+        var val = cond.value; // field value to compare with
+        var type = this.getType(name); // the type of the field
+
+        // First consider the unary operators, an example of encoded query filter string:
+        //  boolean: activeISEMPTY^ORactiveISNOTEMPTY^NQ
+        //  glide_date_time: sys_created_onISEMPTY^ORsys_created_onISNOTEMPTY
+        //  reference: business_serviceISEMPTY^ORbusiness_serviceISNOTEMPTY^NQ
+        //  string: sys_created_byISEMPTY^ORsys_created_byISNOTEMPTY^ORsys_created_byEMPTYSTRING
+        if ('ISEMPTY' !== oper && 'ISNOTEMPTY' !== oper) {
+            if (val) {
+                if (checkNil) {
+                    // `current.getElement(name).getValue();` throws com.glide.script.fencing.MethodNotAllowedException: Function getValue is not allowed in scope x_230565_emsn
+                    // Note gs.nil('') also returns true, but it's a number type field here, '' is invliad.
+                    if (gs.nil(current instanceof Enforcer.AttributeStack ? current.get(name) : SEUtil.derefGet(current, name))) {
+                        return '';
+                    }
+                }
+                switch (type) {
+                    case 'glide_duration':
+                    case 'timer':
+                        if (!val.startsWith('javascript:')) {
+                            // The format of field value is `dd hh:mm:ss`, e.g. 18 16:17:01
+                            // javascript:gs.getDurationDate('1 21:32:40')
+                            val = 'javascript:gs.getDurationDate(\'' + val + '\')';
+                        }
+                        break;
+                    case 'currency':
+                    case 'price':
+                        if (!val.startsWith('javascript:')) {
+                            // [Currency values in lists: Filtering](https://docs.servicenow.com/bundle/jakarta-platform-administration/page/administer/currency/concept/currency-values-lists.html#d431355e125)
+                            // The format of field value is like "CNY;10". e.g. javascript:global.getCurrencyFilter('alm_asset','cost', 'USD;15.00')
+                            var currencyTable, currencyName, idxLastDot = name.lastIndexOf('.');
+                            if (0 > idxLastDot) {
+                                currencyTable = current.getTableName();
+                                currencyName = name;
+                            } else {
+                                var ge = current.getElement(name.substr(0, idxLastDot));
+                                // gs.debug(!!ge + ', ' + !ge + ', ' + ('' == ge));
+                                if (null != ge) { // TODO if the specific field name exists
+                                    currencyTable = ge.getRefRecord().getTableName();
+                                    currencyName = name.substr(idxLastDot + 1);
+                                } else {
+                                    throw new Error('Illegal Argument Exception for ' + JSON.stringify(cond) + ' on the type ' + type);
+                                }
+                            }
+                            val = 'javascript:global.getCurrencyFilter(\'' + currencyTable + '\', \'' + currencyName + '\', \'' + val + '\')';
+                        }
+                        break;
+                    case 'date':
+                    case 'glide_date':
+                        val = EntityField.buidEncodedDate(val);
+                        break;
+                    case 'due_date':
+                    case 'datetime':
+                    case 'glide_date_time':
+                        if (!val.startsWith('javascript:')) {
+                            val = EntityField.buidEncodedDateTime(val);
+                        }
+                        break;
+                    case 'integer':
+                    case 'float':
+                    case 'percent_complete':
+                    case 'glide_time':
+                        break; // as it is.
+                    default:
+                        // if (!this.nonstringTypes) {
+                        //     this.nonstringTypes = EntityField.getNonStringScalarTypeMap();
+                        // }
+                        // var scalarType = this.nonstringTypes[type];
+                        // switch (scalarType) {
+                        //     case 'datetime': break;
+                        //     case 'time': break;
+                        //     default: break;
+                        // }
+                        if ('=' !== oper && '!=' !== oper && 'LIKE' !== oper) {
+                            throw new Error('Illegal Argument Exception for ' + JSON.stringify(cond) + ' with parsed type "' +
+                                type + '" and parsed operator "' + oper + '" on the table "' + current.getTableName() + '"');
+                        }
+                        break;
+                }
+                return name + oper + val;
+            } else {
+                SEUtil.warn('buidEncodedCondition', 'empty value for ' + JSON.stringify(cond));
+                return '';
+            }
+        } else {
+            return name + oper;
+        }
+    },
+
+    /**
+     * Package fields as `CEAttres`.
+     * @param {GlideRecord} record 
+     * @return {CEAttres}
+     */
+    buildCEAttribute: function (record) {
+        var dummpy = CommunicateWithCCAndPC;
+        var ceAttrs = new CEAttres();
+        var fieldDict = this.dict,
+            prop, value, name, type, ge, gED;
+        for (prop in fieldDict) {
+            ge = EntityField.getElement(record, prop);
+            if (null != ge) {
+                gED = ge.getED();
+                type = gED.getInternalType();
+                if (!ge.nil()) {
+                    // SEUtil.trace('EntityField.GetValue', '{0} {1}.{2} = {3}', type, record.getTableName(), name);
+                    value = EntityField.asString(ge, type);
+                    ceAttrs.Add_Attre(prop, value, EntityField.asDataType(type)); // 'current-' + prop.replace(/\./g, '-');
+                } else {
+                    SEUtil.trace('EntityField.asString', '{0} {1}.{2} is nil', type, record.getTableName(), prop);
+                }
+            }
+        }
+        return ceAttrs;
+    }
+};
+
+EntityField.OPERATORS = {
+    'is': '=',
+    'is not': '!=',
+    'greater than': '>',
+    'greater than or equals to': '>=',
+    'less than': '<',
+    'less than or equals to': '<=',
+    'is null': 'ISEMPTY',
+    'is not null': 'ISNOTEMPTY'
+};
+
+/**
+ * Retrieves the GlideElement for a specified field.
+ * @param {GlideRecord} record 
+ * @param {string} name A field name, which is a dot-walkable.
+ * @returns {GlideElement|undefined}
+ */
+EntityField.getElement = function (record, name) {
+    /** @type {GlideElement} may be `null` (on global) or non-null object (on APP scope) whose Java equivalent `GlideElement.value = NULL` */
+    var value = SEUtil.derefGet(record, name);
+    // var ge = record.getElement(name); // both GlideRecord and ScopedGlideRecord support dot-walking and .
+    // gs.debug(typeof ge + ', ' + ge + ', ' + gs.nil(ge) + ', ' + (null == ge) + ', ' + value.getED);
+    // e.g. if `name` is "company.invalid_name" of incident, OUTPUT global: "object, null, true, true"; x_159404_app: object, null, true, false
+    // e.g. if `name` is "company.name" of incident, OUTPUT global: "object, , true, false"; x_159404_app: "object, , true, false" string
+    // e.g. if incident.business_durationISEMPTY, `gs.nil(value)` returns `true`, but `value` is not `null`.
+    // if `name` is invalid, both `getElement` and `SEUtil.derefGet` return `true` on global, `false` on scoped APP, but `SEUtil.derefGet` may return `null`, 
+    if ('' == value || !gs.nil(value)) {
+        return value; // valid
+    }
+    SEUtil.trace('EntityField.getElement', '{0}.{1} is invalid', record.getTableName(), name);
+    // if invalid, calling any method on `GlideElement` will throw "Evaluator: java.lang.NullPointerException" on APP scope
+    // com.glide.script.fencing.ScopedGlideElement.jsFunction_getED(ScopedGlideElement.java:110)
+    // or thorw "Evaluator: org.mozilla.javascript.EcmaError: Cannot convert null to an object." on global scope
+};
+
+/**
+ * Retrives the duration value in "d HH:mm:ss" format.
+ * @param {GlideElement} value a glide object, which may come from `SEUtil.derefGet` or `GlideRecord.getElement`
+ * @return {string} the duration value in "d HH:mm:ss" format.
+ */
+EntityField.asDuration = function (value) {
+    /// asset 'glide_duration' === value.getED().getInternalType();
+    /// I suspect the value here is global API object, we need reconstruct scoped API object.
+    // Evaluator: com.glide.script.fencing.MethodNotAllowedException: Function getDurationValue is not allowed in scope x_159404_app
+    // value.getDurationValue();
+
+    // Scoped GlideDuration.GlideDuration(Number milliseconds) Instantiates a GlideDuration object with the specified duration.
+    // @param {Number} milliseconds The duration value in milliseconds.
+    var dur = new GlideDuration(value.dateNumericValue());
+
+    // Scoped GlideDuration.getValue() Gets the internal value of the GlideDuration object. 
+    // GlideDuration objects store the duration as a date and time from January 1, 1970, 00:00:00.
+    // e.g. new GlideDuration('3 12:00:00').getValue() = 1970-01-04 12:00:00
+
+    // Scoped GlideDuration.getDurationValue() Gets the duration value in "d HH:mm:ss" format.
+    return dur.getDurationValue();
+};
+
+/**
+ * Retrives the string value.
+ * @param {GlideElement} ge a valid `GlideElement` object
+ * @param {string} type teh type of the field.
+ * @return {string} the string value of the field.
+ */
+EntityField.asString = function (ge, type, name) {
+    switch (type) {
+        case 'glide_duration':
+            return EntityField.asDuration(ge);
+        default:
+            return ge.toString();
+    }
+};
+
+/**
+ * @param {string} type teh type of the field.
+ * @return {string}
+ */
+EntityField.asDataType = function (type) {
+    switch (type) {
+        case 'boolean':
+            return CEAttributeType.XACML_Boolean;
+        case 'integer':
+            return CEAttributeType.XACML_Integer;
+        case 'float':
+            return CEAttributeType.XACML_Double;
+        default:
+            return CEAttributeType.XACML_String;
+    }
+};
+
+/**
+ * Package field, format is as following:
+ * * session (S): session.ip ==> session-ip ;
+ * * current (C): current.caller_id.name ==> current-caller_id-name ;
+ * * previous (P): previous.caller_id.name ==> previous-caller_id-name ;
+ * * user (U): user.name, user.company.name ==> user-company-name 
+ * @param {GlideRecord} current 
+ * @param {GlideRecord} previous if null, packaging old values is omited
+ * @return {CEAttres} 
+ * @example var dummpy = Enforcer;
+ * var gr = new GlideRecordSecure('incident');
+ * gr.addNotNullQuery('business_service.name');
+ * gr.query();
+ * if(gr.next()) {
+ *   EntityField.buildCEAttribute(gr);
+ * }
+ */
+EntityField.buildCEAttribute = function (current, previous) {
+    var entityField = new EntityField(current.getTableName());
+    return entityField.buildCEAttribute(current, previous);
+};
+
+/**
+ * Retrieves the map of entity field types and its scalar type excluding string
+ * @return {Object<string, stirng>} the map of the two columns (`type`, `extends`) of the table `sys_glide_object`, it may be `{}`
+ */
+EntityField.getNonStringScalarTypeMap = function () {
+    var gr = new GlideRecordSecure('sys_glide_object');
+    // Total (where scalar_type!="string"): 36, {}; Total: 140, {}
+    gr.addQuery('scalar_type', '!=', 'string');
+    // gr.orderBy('name');
+    gr.query();
+    var glideObjects = {},
+        counter = 0;
+    while (gr.next()) {
+        glideObjects[gr.getValue('name')] = gr.getValue('scalar_type');
+        ++counter;
+    }
+    return glideObjects;
+};
+
+/**
+ * Generates a encoded string for date and time, which is used to filter query in `GlideRecord`
+ * @param {string} value a date and time value in GMT.
+ * @param {string} operator the operator supported by ServiceNow
+ * @return {string} the encoded string
+ * @example gs.debug(buidEncodedDateTime('2017-10-18 16:17:01'))
+ */
+EntityField.buidEncodedDateTime = function (value, operator) {
+    var m = /^\d+([-/])/.exec(value),
+        date;
+    if (m && '-' === m[1]) {
+        // * ISO8601/[RFC3339](https://tools.ietf.org/html/rfc3339), yyyy-MM-ddTHH:mm:ss
+        // * or its variant, yyyy-MM-dd HH:mm:ss
+        if (' ' === value.charAt(10)) { // local date time (yyyy-MM-dd HH:mm:ss)
+            value = value.split(' ');
+            var dateSection = value[0]; //Gets the Date
+            var timeSection = value[1]; //Gets the Time
+            // javascript:gs.dateGenerate('2017-10-18','16:17:01');
+            return 'javascript:gs.dateGenerate(\'' + dateSection + '\',\'' + timeSection + '\')';
+        } else { // ISO8601 date time e.g. 1970-01-01T05:00:00.000Z
+            date = SEUtil.parseISO8601String(value); // @TODO the returned value is nullable
+        }
+    } else {
+        // * RFC2822 / IETF date syntax ([RFC2822 Section 3.3](http://tools.ietf.org/html/rfc2822#section-3.3)), 
+        //   Thu Jan 01 1970 00:00:00 GMT-05:00 (Eastern Standard Time), Thu, 01 Jan 1970 05:00:00 GMT
+        // * MM/dd/yyyy HH:mm:ss.S, e.g. '1/1/1970', '05/02/2018 12:02:22.222 GMT+6' (Wed May 02 2018 14:02:22 GMT+0800 (China Standard Time))
+        date = new Date(value);
+    }
+    // if(!isNaN(d.getTime())){ }
+    return date.toISOString().slice(0, 19).replace('T', ' '); // Uncaught RangeError: Invalid time value
+
+    // // The format of field value is `yy-mm-dd hh:mm:ss`, e.g. 2017-10-18 16:17:01
+    // //Instantiates a new GlideDateTime object from a date and time value in the UTC time zone specified with the format `yyyy-MM-dd HH:mm:ss`.
+    // // A UTC date and time using the format yyyy-MM-dd HH:mm:ss.
+    // var gdt = new GlideDateTime(value);
+    // // ScopedGlideDateTime.getTime() {GlideTime} The Unix duration stamp in system format based on GMT time.
+    // // Returns a GlideTime object that represents the time portion of the GlideDateTime object.
+    // var timeSection = gdt.getTime().getByFormat('hh:mm:ss');
+    // // ScopedGlideDateTime.getDate() {GlideDate} The date in the system time zone.
+    // // Gets the date stored by the GlideDateTime object, expressed in the standard format, yyyy-MM-dd, and the system time zone, UTC by default.
+    // var dateSection = gdt.getDate().getByFormat('yyyy-MM-dd');
+    // return gdt.getValue(); // dateSection + ' ' + timeSection;
+};
+
+/**
+ * Generates a encoded string for date, which is used to filter query in `GlideRecord`
+ * @param {string} value a date value configurated in our Policy. 
+ * @param {string} operator the operator supported by ServiceNow
+ * @return {string} the encoded string
+ * @example gs.debug(EntityField.buidEncodedDate('2017-10-18'))
+ * @see https://docs.servicenow.com/bundle/kingston-application-development/page/app-store/dev_portal/API_reference/glideDateScoped/concept/c_GlideDateScopedAPI.html
+ */
+EntityField.buidEncodedDate = function (value, operator) {
+    var gd = new GlideDate();
+
+    // Scoped GlideDate - setDisplayValue(String asDisplayed) Sets a date value using the current user's display format and time zone.
+    //@param {string} asDisplayed The date in the current user's display format and time zone. The parameter must be formatted using the current user's preferred display format, such as yyyy-MM-dd.
+    gd.setDisplayValue(value);
+
+    //Scoped GlideDate - getValue() Gets the date value stored in the database by the GlideDate object in the internal format, yyyy-MM-dd, and the system time zone, UTC by default.
+    //@return {string} The date value in the internal format and system time zone.
+    return gd.getValue();
+};
+
+/// end of EntityField
+
+/**
+ * @see https://developer.mozilla.org/en-US/docs/Glossary/IIFE
+ */
+Enforcer.AttributeStack = (function () {
+    /**
+     * A map-like holding key-value pairs of user or resource attributes. Its component format is "key=value".
+     * @param {Array<string>} source An Array object whose elements are key-value pairs (arrays with a string, e.g. ["ative=true",
+     * "priority=2", "caller_id.department.name=Sales"]).
+     * @param {string} [name] a table name if the speficied `source` represents a resource entity attribute source, but it's
+     *  optional for user attribute source.
+     * @example  var userStack = new AttributeStack(["name=admin", "priority=2", "caller_id.department.name=Sales"]);
+     */
+    function AttributeStack(source, name) {
+        this.source = {};
+        this.gr = new GlideRecordSecure(name);
+        if (source) {
+            for (var idx = 0; idx < source.length; ++idx) {
+                var pair = source[idx].split('=');
+                this.source[pair[0]] = pair[1];
+            }
+        }
+    }
+
+    /**
+     * Retrieves the value of the field with the specified name from this source.
+     * @param {string} name the name of the attribute whose value you want to get.
+     * @return the value of a specified attribute on the user. If the given field is not selected in the User Attributes web page,
+     * 	the returned value will be `undefined`. If it does not exist, the value returned will either be null or "" (the empty string);
+     * @see https://stackoverflow.com/questions/20424226/easy-way-to-set-javascript-object-multilevel-property
+     * @see https://docs.servicenow.com/bundle/geneva-servicenow-platform/page/use/navigation/concept/c_DotWalking.html
+     */
+    AttributeStack.prototype.get = function (name) {
+        return this.source[name];
+    };
+
+    /**
+     * Retrieves the name of the table associated with this `AttributeStack`. Note this method is only used to maintain the compatibility
+     * to `GlideRecord` or the `current` variable in {@link Decision} (search the keyword `Decision.current.getTableName`).
+     * @return The table name
+     * @see https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideRecordScoped/concept/c_GlideRecordScopedAPI.html#r_ScopedGlideRecordGetTableName
+     */
+    AttributeStack.prototype.getTableName = function () {
+        return this.gr.getTableName();
+    };
+
+    /**
+     * Retrieves the query condition of the current result set as an encoded query string. Note this method is only used to maintain the compatibility
+     * to `GlideRecord` or the `current` variable in {@link Enforcer#buildQueryFilter} (search the keyword `current.getEncodedQuery()`).
+     * @return {string} The encoded query as a string.
+     * @see https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideRecordScoped/concept/c_GlideRecordScopedAPI.html#r_ScopedGlideRecordGetEncodedQuery
+     */
+    AttributeStack.prototype.getEncodedQuery = function () {
+        return '';
+    };
+
+    /**
+     * Determines if the specified field is defined in the current table. Note this method is only used to maintain the compatibility
+     * to `GlideRecord` or the `current` variable in {@link Enforcer#checkOwnerAlwaysAllow} (search the keyword `current.isValidField('sys_created_by')`).
+     * @param {string} columnName The name of the the field.
+     * @return {boolean} True if the field is defined for the current table.
+     * @see https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideRecordScoped/concept/c_GlideRecordScopedAPI.html#r_ScopedGlideRecordIsValidField
+     */
+    AttributeStack.prototype.isValidField = function (columnName) {
+        return this.gr.isValidField(columnName);
+    };
+
+    /**
+     * Retrieves the GlideElement object for the specified field. Note this method is only used to maintain the compatibility
+     * to `GlideRecord` or the `current` variable in {@link EntityField#buidEncodedCondition} (search the keyword `javascript:global.getCurrencyFilter`).
+     * @param {string} columnName columnName Name of the column to get the element from.
+     * @return {GlideElement} The GlideElement for the specified column of the current record.
+     * @see https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideRecordScoped/concept/c_GlideRecordScopedAPI.html#r_ScopedGlideRecordIsValidField
+     */
+    AttributeStack.prototype.getElement = function (columnName) {
+        return this.gr.getElement(columnName);
+    };
+
+    /**
+     * Retrieves the display value for the current record. Note this method is only used to maintain the compatibility
+     * to `GlideRecord` or the `current` variable in {@link Decision} or {@link PolicyAgent}.
+     * @return {string} The display value for the current record. e.g. INC0010072. // gs.debug(typeof current.getDisplayValue()); // string even if empty
+     * @see https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideRecordScoped/concept/c_GlideRecordScopedAPI.html#r_ScopedGlideRecordGetDisplayValue
+     */
+    AttributeStack.prototype.getDisplayValue = function () {
+        return this.gr.getDisplayValue();
+    };
+
+    /**
+     * Retrieves the table's label. Note this method is only used to maintain the compatibility
+     * to `GlideRecord` or the `current` variable in {@link Decision} or {@link PolicyAgent}.
+     * @return {string} Table's label. e.g. Incident
+     * @see https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideRecordScoped/concept/c_GlideRecordScopedAPI.html#SGR-getClassDisplayValue
+     */
+    AttributeStack.prototype.getClassDisplayValue = function () {
+        return this.gr.getClassDisplayValue();
+    };
+
+    /**
+     * Retrieves the class name for the current record. Note this method is only used to maintain the compatibility
+     * to `GlideRecord` or the `current` variable in {@link Decision} or {@link PolicyAgent}.
+     * @return {string} The class value. e.g. 'incident'
+     * @see https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideRecordScoped/concept/c_GlideRecordScopedAPI.html#r_ScopedGlideRecordGetRecordClassName
+     */
+    AttributeStack.prototype.getRecordClassName = function () {
+        return this.gr.getRecordClassName();
+    };
+
+    return AttributeStack;
+})(); /// end of AttributeStack]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-09-28 03:21:08</sys_created_on>
+        <sys_id>92b6eb904f210300b44b00f18110c753</sys_id>
+        <sys_mod_count>418</sys_mod_count>
+        <sys_name>Enforcer</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_script_include_92b6eb904f210300b44b00f18110c753</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-04-19 03:25:15</sys_updated_on>
+    </sys_script_include>
+</record_update>

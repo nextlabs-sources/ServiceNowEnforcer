@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>public</access>
+        <active>true</active>
+        <api_name>x_230565_emsn.TokenOAuthCC</api_name>
+        <client_callable>false</client_callable>
+        <description>get token from cc</description>
+        <name>TokenOAuthCC</name>
+        <script><![CDATA[///<reference path="./typings/sn-global.d.ts" />
+
+//#region - Token
+
+var TokenOAuthCC = Class.create();//function type
+var PROP_NS = 'com.nextlabs.cc.oauth';
+var SCOPE_NAME = gs.getCurrentScopeName();//'x_230565_emsn';
+var TOKEN_PROP = 'token';
+var EXPIRE_DATE_PROP = 'expiredate';
+
+//alias
+var HttpRequest = sn_ws.RESTMessageV2;
+
+TokenOAuthCC.getToken = function(global) {
+
+    var tokenCached = gs.getProperty(format('{0}.{1}.{2}', SCOPE_NAME, PROP_NS, TOKEN_PROP), null);
+    var expireDate = gs.getProperty(format('{0}.{1}.{2}', SCOPE_NAME, PROP_NS, EXPIRE_DATE_PROP), null);
+
+    //gs.debug(format('token cached: {0}', tokenCached));
+    //gs.debug(format('token expiredata: {0}', expireDate));
+
+    if(!tokenCached || !expireDate || Number(expireDate) <= Date.now()){
+        //enableSSLVerification(false);
+        tokenCached = requestToken(global);
+    }
+    
+    return tokenCached;
+};
+
+TokenOAuthCC.forceRefreshToken = function() {
+    requestToken();
+};
+
+//endregion
+
+//#region - helpers
+
+function getOAuthConfig() {
+
+    var oauthHostPropName = 'OAuthHost';
+    var oauthPortPropName = 'OAuthPort';
+    var oauthHttpsPropName = 'OAuthHttps';
+    var clientIdPropName = 'ClientId';
+    var clientSecretPropName = 'ClientKey';
+
+    var config = {};
+
+    config['host'] = gs.getProperty(format('{0}.{1}', SCOPE_NAME, oauthHostPropName));
+    config['port'] = gs.getProperty(format('{0}.{1}', SCOPE_NAME, oauthPortPropName));
+    config['https'] = gs.getProperty(format('{0}.{1}', SCOPE_NAME, oauthHttpsPropName));
+    config['id'] = gs.getProperty(format('{0}.{1}', SCOPE_NAME, clientIdPropName));
+    config['secret'] = gs.getProperty(format('{0}.{1}', SCOPE_NAME, clientSecretPropName));
+
+    return config;
+}
+
+function getCCTokenUrl() {
+
+    var CC_PATH = '/cas/token';
+    var tokenUrl = '';
+    var urlReg = /(https|http)?(?:\:\/\/)?([a-zA-Z0-9\-.]+)(?:\:)?(\d+)?(\/[a-zA-Z0-9.\-_~!$&'()*+,;=:@/%]+)?\??/i;
+    var config = getOAuthConfig();
+
+    var url = config['host'];
+    var port = config['port'];
+    var https = config['https'] === 'true' ? true : false;
+
+    if(url){
+        var matches = urlReg.exec(url);
+        var schema = matches[1];
+        var host = matches[2];
+        var path = matches[4];
+
+        // gs.debug(JSON.stringify(data));
+        // gs.debug(host);
+        // gs.debug(port);
+        // gs.debug(port);
+        // gs.debug(path);
+
+        if(https && port){
+            tokenUrl = format('https://{0}:{1}{2}', host, port, CC_PATH);
+        }
+        else if(https && !port) {
+            tokenUrl = format('https://{0}{1}', host, CC_PATH);
+        }
+        else if(!https && port) {
+            tokenUrl = format('http://{0}:{1}{2}', host, port, CC_PATH);
+        }
+        else{
+            tokenUrl = format('http://{0}{1}', host, CC_PATH);
+        }
+    }
+    else{
+        SEUtil.error('getCCTokenUrl', 'failed, url not configured.');
+    }
+
+    SEUtil.debug('getCCTokenUrl', 'tokenUrl: {0}', tokenUrl);
+
+    return tokenUrl;
+}
+
+function requestToken(global) {
+
+    var req = new HttpRequest();
+    var CC_TOKEN_URL = getCCTokenUrl();
+    var config = getOAuthConfig();
+    var token = '';
+
+    var clientId = config['id'] || '';
+    var clientSecret = config['secret'] || '';
+    
+    req.setEndpoint(CC_TOKEN_URL);
+    req.setHttpMethod('POST');
+    req.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+
+    // req.setStringParameter('grant_type', 'client_credentials');
+    // req.setStringParameter('client_id', clientId);
+    // req.setStringParameter('client_secret', clientSecret);
+
+    var data = format('client_id={0}&client_secret={1}&grant_type=client_credentials', clientId, clientSecret);
+    req.setRequestBody(data);
+
+    var res = global ? req.execute() : req.executeAsync();
+
+    if(!res.haveError()){
+
+        try{
+            var result = JSON.parse(res.getBody());
+            var validation = Number(result['expires_in']);
+            token = result['access_token'];
+
+            if(token && !isNaN(result['expires_in'])){
+                /// Bug 48000 - unable to enforce with helsinki version build
+                // gs.setProperty(format('{0}.{1}.{2}', SCOPE_NAME, PROP_NS, TOKEN_PROP), token);
+                // gs.setProperty(format('{0}.{1}.{2}', SCOPE_NAME, PROP_NS, EXPIRE_DATE_PROP), validation * 1000 + Date.now());
+				SEUtil.saveProperty(format('{0}.{1}', PROP_NS, TOKEN_PROP), token);
+				SEUtil.saveProperty(format('{0}.{1}', PROP_NS, EXPIRE_DATE_PROP), validation * 1000 + Date.now());
+            }
+            else{
+                gs.debug(format('requestToken failed, invalid response: {0}', res.getBody()));
+            }
+
+            return token;
+        }
+        catch(e){
+            SEUtil.error('requestToken', 'failed. Response: ' + e.message);
+        }
+    }
+    else{
+		SEUtil.debug('requestToken', 'failed, Error: {0}', res.getBody());
+    }
+
+    //gs.debug(format('token: {0}', token));
+
+    return token;
+}
+
+function format() {
+    var result = '';
+    var placeholderReg = /\{(\w+)\}/gi;
+    var args = Array.prototype.slice.call(arguments, 0);
+    var template = args[0];
+
+    if (typeof template === 'string') {
+        result = template.replace(placeholderReg, function (value, num) {
+            return args[Number(num) + 1];
+        });
+    }
+    return result;    
+}
+
+function enableSSLVerification(isEnable) {
+
+    isEnable = !!isEnable;
+
+    gs.setProperty('com.glide.communications.trustmanager_trust_all', !isEnable);
+    gs.setProperty('com.glide.communications.httpclient.verify_hostname', isEnable);    
+}
+
+//endregion
+
+//gs.debug(TokenOAuthCC.getToken());]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-12-01 08:21:29</sys_created_on>
+        <sys_id>83729a094f3203003ab4e9628110c720</sys_id>
+        <sys_mod_count>20</sys_mod_count>
+        <sys_name>TokenOAuthCC</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy>protected</sys_policy>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_script_include_83729a094f3203003ab4e9628110c720</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2018-03-06 11:48:00</sys_updated_on>
+    </sys_script_include>
+</record_update>

@@ -1,0 +1,1032 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>public</access>
+        <active>true</active>
+        <api_name>x_230565_emsn.Decision</api_name>
+        <client_callable>false</client_callable>
+        <description/>
+        <name>Decision</name>
+        <script><![CDATA[var Decision = Class.create();
+Decision.prototype = {
+    initialize: function () {},
+
+    type: 'Decision'
+};
+
+(function () {
+
+    /**
+     * @public
+     * Evaluates current resource based on queried policies only by evaluating Subject Component (User attribtues). Please note it uses the Recource
+     * Components of matching Policy (currently only the first one is supported) as the `record_filter` obligations of the returned value.
+     * @param {Policy[]} policies the queried policies with the VIEW action
+     * @param {GlideRecordSecure|GlideRecord} current the current resource to evaluate
+     * @return {DecisionResult?} Return an authorization evaluation result or nothing if no policies whose subject component are matched.
+     */
+    Decision.getObligationsBySubject = function (policies, current, user) {
+        {
+            // var watchStart = new Date();
+            Decision.objUser = user instanceof Enforcer.AttributeStack ? user : Enforcer.lazyUserStack();
+            // Decision.objUser = {};
+            // getCEAttributesOfUser(gs.getUser().getID(), Decision.objUser);
+            // SEUtil.logTime('Decision.getObligationsBySubject|getCEAttributesOfUser', watchStart);
+            // SEUtil.debug('Decision.getObligationsBySubject|getCEAttributesOfUser', JSON.stringify(Decision.objUser));
+        }
+
+        Decision.current = current;
+
+        var filterObligations = []; // ORConditions: filterCondition[0] OR filterCondition[2] OR ...
+        /** @type {boolean?} */
+        var alwaysAllowOwner;
+        var denyPolicyExists = false; // https://stackoverflow.com/questions/1566745/boolean-method-naming-readability
+        var effectCount = 0;
+        for (var idx = 0; idx < policies.length; ++idx) {
+            var policy = policies[idx];
+            // check whether policy is matched by evaluateing subject Components to check it
+            if (evalComponents(policy.Subjects, true)) {
+                ++effectCount;
+                // Check if it is a policy with deny effect.
+                if ('deny' == policy.Enforcement) {
+                    denyPolicyExists = true;
+                }
+                var conditions;
+                if (policy.expression) {
+                    conditions = convertAdvancedConditionsToAndConditions(policy.expression);
+                } else {
+                    conditions = convertResourceComponentsToAndConditions(policy.FromResource);
+                }
+                if (conditions.length) {
+                    filterObligations.push(conditions);
+                }
+                // Currently don't support the OwnerAlwaysAllow obligation
+                if (isOwnerAlwaysAllow(policy)) {
+                    // SEUtil.debug('Decision.getObligationsBySubject|isOwnerAlwaysAllow=true');
+                    alwaysAllowOwner = true;
+                } else if (!conditions.length) {
+                    SEUtil.debug('Decision.getObligationsBySubject', 'empty conditions from both expression ({0}) and FromResource ({1}), denyPolicyExists = {2}',
+                        policy.expression, JSON.stringify(policy.FromResource), denyPolicyExists);
+                    return {
+                        Allowed: !denyPolicyExists
+                    };
+                }
+            }
+        }
+
+        if (effectCount) {
+            /** @type {DecisionResult} */
+            var result = {
+                Allowed: !denyPolicyExists
+            };
+            if (filterObligations.length) {
+                result.record_filter = filterObligations;
+            }
+            if (alwaysAllowOwner) {
+                result.OwnerAlwaysAllow = alwaysAllowOwner;
+            }
+            return result;
+        }
+    };
+
+    /**
+     * @param {boolean} denied a boolean value, `true` indicates the final decision is reject/block/deny
+     * @see PolicyResponse
+     */
+    function DecisionResult(denied) {
+        this.Denied = denied;
+    }
+
+    DecisionResult.prototype.setObligation = function (name, obligation) {
+        if (obligation) {
+            var obligationMap = this.Obligations;
+            if (!obligationMap) {
+                obligationMap = {};
+                this.Obligations = obligationMap;
+            }
+            obligationMap[name] = obligation;
+        }
+    };
+
+    /**
+     * Evaluates subject/resource components and returns `true` or `false`.
+     * @param {ComponentGroup[]} components The subject/resource components to evaluate
+     * @param {boolean} isUser whether attributes of component used to compare are fetched from the user table, This is 
+     * because all come from ServiceNow tables (a user table and the other tables).
+     * @return `true` if all conditions of subject components are met; otherwise, `false`.
+     */
+    function evalComponents(components, isUser) {
+        for (var idx = 0; idx < components.length; ++idx) {
+            if (!evalSubjectOrResource(components[idx], isUser)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Convert Resource Components of a policy to the resource filter obligations. Note that its configuation on the Web Console UI looks like:
+     * Resource Components (?)
+     * <pre>
+     *              +------------------------------------------------------------+
+     * +----------+ | +-----------------+        +-----------------+             | 
+     * | IN      v| | | Component 1 (x) | - OR - | Component 2 (x) | - OR - ...  |  <-- ComponentGroup: currently only support one component
+     * +----------+ | +-----------------+        +-----------------+             | 
+     *              | Search for Resource                                        |
+     *     |        +------------------------------------------------------------+
+     *     o -AND-
+     *     |        +------------------------------------------------------------+
+     * +----------+ | +-----------------+        +-----------------+             | 
+     * | IN      v| | | Component 3 (x) | - OR - | Component 4 (x) | - OR - ...  | <-- another ComponentGroup
+     * +----------+ | +-----------------+        +-----------------+             | 
+     *              +------------------------------------------------------------+
+     * </pre>
+     * Howerver, currently it supports to contain only one component in every ComponentGroup while every policy can contain one or more ComponentGroups.
+     * @param {ComponentGroup[]} resourceComponents resource components to convert to the resource filter obligation object
+     * @return {FilterCondition[]} a filter condition obligation array and if two or more relations, they should be logically joined using the logical
+     *  operators AND according to the semantic in Policy.
+     * @see https://docs.servicenow.com/bundle/jakarta-platform-user-interface/page/use/using-lists/concept/c_UsingORConditions.html
+     */
+    function convertResourceComponentsToAndConditions(resourceComponents) {
+        var andConditions = [];
+        for (var idx = 0; idx < resourceComponents.length; ++idx) {
+            var componentGroup = resourceComponents[idx];
+            var components = componentGroup.Components;
+            if (components.length) {
+                // currently we just get the first Component even if multiple exist.
+                var firstComponent = components[0];
+                var conditions = firstComponent.Conditions;
+                if (conditions.length) {
+                    // currently we just get the first Attribute Comparison Condition even if multiple exist.
+                    var firstCondition = conditions[0];
+                    andConditions.push({
+                        field: firstCondition.attribute,
+                        operator: firstCondition.operator,
+                        value: firstCondition.value
+                    });
+                }
+            }
+        }
+        return andConditions;
+    }
+
+    /**
+     * Convert a string expression from Advanced Conditions of a policy to the resource filter obligations.
+     * @param {string} expression A string representing logical AND operation expression. The expression can include variables and properties of existing
+     *  objects on subject and resouce attributes. Logical AND has left-to-right associativity. e.g. `user.name="admin"`, 
+     *  `resource.incident.severity>2 and resource.incident.number="INC0000001" and user.department-name=resource.incident."caller_id.department.name"`
+     * @return {FilterCondition[]} a filter condition obligation array and if two or more relations, they should be logically joined using the logical
+     *  operators AND according to the semantic in Policy.
+     */
+    function convertAdvancedConditionsToAndConditions(expression) {
+        // console.log('convertAdvancedConditionsToAndConditions(`' + expression + '`):');
+        // trim beginning and trailing whitespace and parentheses
+        expression = expression.replace(/^\s*\(|\)\s*$/g, '');
+        // var infixNotations = parseAdvancedCondition(expression);
+        // A and B and C
+        var index = 0,
+            previousIndex = 0,
+            length = expression.length,
+            andConditions = [];
+        for (; index < length;) {
+            // read one logical operator token from the stream (consisting of expression, index)
+            if (LogicalToken.AND.eat(expression, index)) { // Cases for A AND, B AND, ...
+                putComparisonAsFilterCondition();
+                index += LogicalToken.AND.length;
+                previousIndex = index;
+            } else {
+                ++index;
+            }
+        }
+        if (previousIndex < index) { // C
+            putComparisonAsFilterCondition();
+        }
+
+        function putComparisonAsFilterCondition() {
+            var attributeComparison = tokenizeComparison(expression.substring(previousIndex, index).trim());
+            var attribute = attributeComparison.attribute; // resource.tableName.columnName1.columnName2...
+            
+            /** @type {string} Use `getUserValue()` resolve value if it represents a variable, i.e. it starts with "$".*/
+            var value = attributeComparison.value;
+            if (value && value.startsWith('${user')) {
+                var userKey = value.substring(7, value.length - 1); // where, '${user.'.length === 7. e.g. ${user.department-name} ==> department-name
+                value = getUserValue(userKey);
+                SEUtil.debug('putComparisonAsFilterCondition', 'resolve a user variable {0} to {1}', userKey, value);
+            }
+
+            andConditions.push({
+                field: attribute.substr(1 + attribute.indexOf('.', 'resource.'.length)),
+                operator: attributeComparison.operator,
+                value: value
+            });
+        }
+        // console.log('=================\n' + andConditions.join('\n') + '\n=================');
+        // SEUtil.debug('convertAdvancedConditionsToAndConditions', 'parsed: {0}', andConditions);
+        // SEUtil.info('convertAdvancedConditionsToAndConditions', 'parsed: ' + andConditions.join());
+        return andConditions;
+    }
+
+    /**
+     * @param {string} keyword a logical operator keyword
+     * @param {function(string, number):number} [eater] A callback that handles this logical operator token whose signature is {@link LogicalToken#eat}
+     */
+    function LogicalToken(keyword, eater) {
+        this.keyword = keyword;
+        this.length = keyword.length;
+        eater && (this.eat = eater);
+    }
+    LogicalToken.prototype = {
+        /**
+         * Every object has a `toString()` method that is automatically called when the object is to be represented as a text value or when an object is referred to
+         * in a manner in which a string is expected. By default, the `toString()` method is inherited by every object descended from `Object`. If this method is not
+         * overridden in a custom object, `toString()` returns "[object type]", where `type` is the object type. The following code illustrates this:
+         * `var o = new Object(); o.toString(); // returns [object Object]`
+         * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/toString
+         */
+        toString: function () {
+            return this.keyword;
+        },
+        /**
+         * Check if any characters were eaten.
+         * @param {string} expression an string expression to scan
+         * @param {number} offset the index at which the current token starts
+         * @return the consumed length if the expression starting from the specified `index` can be eaten, otherwise, 0.
+         */
+        eat: function (expression, offset) {
+            return expression.startsWith(this.keyword, offset) ? this.length : 0;
+        }
+    };
+    LogicalToken.AND = new LogicalToken('AND', function (expression, index) {
+        if ('A' == expression.charAt(index) && 'N' == expression.charAt(1 + index) && 'D' == expression.charAt(2 + index)) {
+            return 3;
+        }
+        return 0;
+    });
+    LogicalToken.OR = new LogicalToken('OR', function (expression, index) {
+        return 'O' == expression.charAt(index) && 'R' == expression.charAt(1 + index) ? 2 : 0;
+    });
+    /**
+     * Comparison operators: >=, <=, !=, =, >, <. Note the order is important (check single character operators must follow after two character operators).
+     * See also {@link evalAdvancedCondition}.
+     * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Comparison_Operators
+     */
+    const COMPARISON_OPERATORS = ['=', '>', '<', '>=', '<=', '!='];
+
+    /**
+     * Parse a string expression
+     * @param {string} expression A string representing logical operation expression. The expression can include variables and properties of existing
+     *  objects on subject and resouce attributes. e.g. `user.name="admin"`, 
+     *  `resource.incident.severity>2 and resource.incident.number="INC0000001" or user.department-name=resource.incident."caller_id.department.name"`
+     * @return {any[]} a infix notation array
+     * @example 
+var expression = 'resource.incident.severity>2 AND resource.incident.number="INC0000001" OR user."department-name"=resource.incident."caller_id.department.name"';
+console.log('parseAdvancedCondition(expression) outputs: \n' + parseAdvancedCondition(expression).join('\n')); // A and B or C
+     */
+    function parseAdvancedCondition(expression) {
+        expression = expression.replace(/^\s*\(|\)\s*$/g, '');
+        // A and B or C
+        var index = 0,
+            previousIndex = 0,
+            length = expression.length,
+            subexpressions = [];
+        for (; index < length;) {
+            // read one logical operator token from the stream (consisting of expression, index)
+            if (LogicalToken.AND.eat(expression, index)) { // Cases for A AND, B AND, ...
+                subexpressions.push(tokenizeComparison(expression.substring(previousIndex, index).trim()));
+                subexpressions.push(LogicalToken.AND);
+                index += LogicalToken.AND.length;
+                previousIndex = index;
+            } else if (LogicalToken.OR.eat(expression, index)) { // Cases for A OR, B OR, ...
+                subexpressions.push(tokenizeComparison(expression.substring(previousIndex, index).trim()));
+                subexpressions.push(LogicalToken.OR);
+                index += LogicalToken.OR.length;
+                previousIndex = index;
+            } else {
+                ++index;
+            }
+        }
+        if (previousIndex < index) { // C
+            subexpressions.push(tokenizeComparison(expression.substring(previousIndex, index).trim()));
+        }
+
+        // console.log('=================\n', subexpressions.join('\n'), '\n=================');
+        // SEUtil.debug('parseAdvancedCondition', 'parsed: {0}', subexpressions);
+        SEUtil.info('parseAdvancedCondition', 'parsed: ' + subexpressions);
+        return subexpressions;
+    }
+
+    /**
+     * +-----------------------------------+----------------------------------------------+
+     * |   Token name                      |   Token values                               |
+     * +===================================+==============================================+
+     * |                                   | resource.tableName.columnName                |
+     * |   identifier                      | resource.tableName."columnName.columnName"   |
+     * |                                   | user.columnName                              |
+     * |                                   | user."columnName-columnName"                 |
+     * +-----------------------------------+----------------------------------------------+
+     * |   keyword                         | resource, user                               |
+     * +-----------------------------------+----------------------------------------------+
+     * |                                   | Comparison operators: >, >=, =, <, <=, !=    |
+     * |   operator                        | include                                      |
+     * |                                   | Logical operators: AND, OR                   |
+     * +-----------------------------------+----------------------------------------------+
+     * |   Separator                       | Grouping operator: ()                        |
+     * |   Punctuation                     | Dot (.), HYPHEN-MINUS (-),                   |
+     * |                                   | double quotation marks ("")                  |
+     * +-----------------------------------+----------------------------------------------+
+     * |                                   | number literal: 2                            |
+     * |   literal                         | string literal: "INC0000001", "qa", "IT"     |
+     * |   Special string literal          | a string literal contains two asterisks (**) |
+     * +-----------------------------------+----------------------------------------------+
+     * @param {string} comparison A string representing logical operation expression. The expression can include
+     *  variables and properties of existing objects on subject and resouce attributes. e.g. `user.name="admin"`
+     * @return {AttributeComparison} an attribute comparison object
+     * @see https://www.tutorialspoint.com/compiler_design/compiler_design_lexical_analysis.htm
+     * @see https://en.wikipedia.org/wiki/Lexical_analysis
+     */
+    function tokenizeComparison(comparison) {
+        for (var idx = COMPARISON_OPERATORS.length; --idx >= 0;) {
+            var oper = COMPARISON_OPERATORS[idx];
+            var operIdx = comparison.indexOf(oper);
+            if (0 < operIdx) {
+                var attribute = comparison.substr(0, operIdx).trim();
+                if (attribute.endsWith('"')) {
+                    var idxDoubleQuote = attribute.indexOf('"');
+                    // console.log(attribute.substring(1 + idxDoubleQuote, attribute.length - 1));
+                }
+                var rightType;
+                var rightValue = comparison.substr(operIdx + oper.length).trim();
+                if (rightValue.startsWith('"')) {
+                    rightType = 'string'; // https://en.wikipedia.org/wiki/String_literal
+                    rightValue = rightValue.substring(1, rightValue.length - 1);
+                } else if (!isNaN(rightValue)) {
+                    // https://en.wikipedia.org/wiki/Literal_(computer_programming)
+                    rightType = 'number';
+                } else {
+                    rightType = 'identifier';
+                    var idxDoubleQuote = rightValue.indexOf('"');
+                    if (0 < idxDoubleQuote) {
+                        rightValue = rightValue.substring(0, idxDoubleQuote) + rightValue.substring(1 + idxDoubleQuote, rightValue.length - 1);
+                    }
+					if (rightValue.toLowerCase() != 'null') {
+					   rightValue = '${' + rightValue + '}';	
+					}                    
+                }
+                return {
+                    attribute: attribute.replace(/"/g, ''),
+                    operator: oper,
+                    value: rightValue,
+                    valueType: rightType,
+                    /** @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/toString */
+                    toString: function () {
+                        return '(identifier, ' + this.attribute + ') ' + this.operator + ' (' + rightType + ', ' + this.value + ')';
+                    }
+                };
+            }
+        }
+    }
+
+    /**
+     * Evaluate a logical string expression in the current context. Currently only support expression:
+     * `<Expression> ::= <Condition> <Logical-Operator> <Condition> <Logical-Operator> ...` // ( <Logical-Operator> <Condition>)*
+     * where `<Logical-Operator> ::= "AND" | "OR"` and `<Condition> ::= <Attribute> <Comparison-Operator> <Value>`, moreover `<Condition>`
+     *  cannot contain the keyword `<Logical-Operator>`.
+     * where `<Comparison-Operator> ::= '=' | '>' | '<' | '>=' | '<=' | '!='`, moreover `<Attribute>`
+     *  cannot contain the keyword `<Comparison-Operator>`.
+     * @param {string} expression A string representing logical operation expression. The expression can include variables and properties of existing
+     *  objects on subject (keyword is user) and resouce (keyword is resource.tableName) attributes. e.g. `user.name="admin"`. 
+     *  `resource.incident.severity>2 AND resource.incident.number="INC0000001" OR user."department-name"=resource.incident."caller_id.department.name"`
+     * @return {boolean}
+     */
+    function evalAdvancedCondition(expression) {
+        var retval, logicalOper, infixNotations = parseAdvancedCondition(expression);
+        // `false && true || 1` ==> 1, `false && true || 0 || 1 && 2` ==> 2
+        for (var idx = 0; idx < infixNotations.length;) {
+            // console.log('evalAdvancedCondition:', idx, infixNotations[idx]);
+            // SEUtil.debug('evalAdvancedCondition', 'eval condition at {0}: {1}', idx, infixNotations[idx]);
+            // SEUtil.info('evalAdvancedCondition', 'eval condition at ' + idx + ': ' + infixNotations[idx]);
+            var result = evalCondition(infixNotations[idx]);
+            SEUtil.info('evalAdvancedCondition', 'eval to ' + result + ' for condition at ' + idx + ': ' + infixNotations[idx]);
+            if (LogicalToken.OR == logicalOper) {
+                retval = retval || result;
+            } else if (LogicalToken.AND == logicalOper) {
+                retval = retval && result;
+            } else {
+                retval = result;
+            }
+            logicalOper = infixNotations[++idx];
+            // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_Operators#Short-circuit_evaluation
+            if ((LogicalToken.OR == logicalOper && result) || (LogicalToken.AND == logicalOper && !result)) {
+                for (var operIdx = idx + 2; operIdx < infixNotations.length; operIdx += 2) {
+                    if (logicalOper != infixNotations[operIdx]) {
+                        logicalOper = infixNotations[operIdx];
+                        break;
+                    }
+                }
+                idx = operIdx + 1;
+            } else {
+                ++idx;
+            }
+        }
+        if (!Decision.current instanceof Enforcer.AttributeStack) {
+            var gr = Decision.current;
+            //  + '{severity=' + gr.severity + ', caller_id.department.name=' + gr.caller_id.department.name + '}'
+            SEUtil.info('evalAdvancedCondition', retval + ' <= eval ' + expression + ' on ' + gr.getClassDisplayValue() + '.' + gr.getDisplayValue() + '@' + gr.sys_id);
+        }
+        return retval;
+    }
+
+    /**
+     * @public
+     *  Evaluate current resource based on queried policies as well as Subject Component (User attribtues) 
+     */
+    Decision.evalPolicys = function (policys, current, user) {
+        if (gs.nil(current)) {
+            return false;
+        }
+        //if (null == Decision.objUser)
+        {
+            Decision.objUser = user instanceof Enforcer.AttributeStack ? user : Enforcer.lazyUserStack();
+            // Decision.objUser = {};
+            // getCEAttributesOfUser(gs.getUser().getID(), Decision.objUser);
+            //gs.debug(JSON.stringify(Decision.objUser));
+        }
+
+        {
+            cacheResKey(current);
+        }
+
+        Decision.current = current;
+        var arr = [];
+		gs.debug('will enforced policy size:'+policys.length);
+        for (var i = 0; i < policys.length; ++i) {
+            if (evalPolicy(policys[i])) {
+                arr.push(policys[i]);
+            }
+        }
+        gs.debug("filter policys num: " + arr.length);
+
+        if (arr.length == 0) {
+			gs.debug('decision result:'+true);
+            return true;
+        }
+
+        for (var i = 0; i < arr.length; ++i) {
+            if (arr[i].Enforcement == 'deny') {
+				gs.debug('decision result:'+true);
+                return true;
+            }
+        }
+		gs.debug('decision result:'+false);
+        return false;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////
+    function checkOwner(policys) {
+        var hasOwnerAlwaysAllow = false;
+        for (var i = 0; i < policys.length; ++i) {
+            if (isOwnerAlwaysAllow(policys[i])) {
+                hasOwnerAlwaysAllow = true;
+            }
+        }
+
+        if (hasOwnerAlwaysAllow) {
+            var cond1 = {
+                attribute: 'sys_created_by',
+                operator: '=',
+                value: '${user.name}'
+            };
+            var cond2 = {
+                attribute: 'sys_created_by',
+                operator: '=',
+                value: '${user.user_name}'
+            };
+            if (evalCondition(cond1, false)) {
+                return true;
+            }
+            if (evalCondition(cond2, false)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function checkOwnerSingle(policy) {
+        var hasOwnerAlwaysAllow = false;
+        if (isOwnerAlwaysAllow(policy)) {
+            hasOwnerAlwaysAllow = true;
+        }
+        if (hasOwnerAlwaysAllow) {
+            var cond1 = {
+                attribute: 'sys_created_by',
+                operator: '=',
+                value: '${user.name}'
+            };
+            var cond2 = {
+                attribute: 'sys_created_by',
+                operator: '=',
+                value: '${user.user_name}'
+            };
+            if (evalCondition(cond1, false)) {
+                return true;
+            }
+            if (evalCondition(cond2, false)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function isOwnerAlwaysAllow(policy) {
+        if ('allow' == policy.Enforcement) {
+            for (var i = 0; i < policy.AllowObigations.length; ++i) {
+                if ("OwnerAlwaysAllow" == policy.AllowObigations[i].name) {
+					return true;
+					/*
+                    if ("True" == policy.AllowObigations[i].params.OwnerAlwaysAllow) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+					*/
+                }
+            }
+            return false;
+        } else {
+            //gs
+            for (var i = 0; i < policy.denyObligations.length; ++i) {
+                if ("OwnerAlwaysAllow" == policy.denyObligations[i].name) {
+					return true;
+					/*
+                    if ("True" == policy.denyObligations[i].params.OwnerAlwaysAllow) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+					*/
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * @param {Policy} policy a policy to evaluate conditions in Subject Components and Resource Components and the Advanced Condition expression.
+     * @return {boolean} the evaluation result of those logical conditions and expression.
+     */
+    function evalPolicy(policy) {
+        //gs.debug("policy.Subjects.length " + policy.Subjects.length);
+        var retSubjects = true;
+        for (var i = 0; i < policy.Subjects.length; ++i) {
+            var tmp = evalSubjectOrResource(policy.Subjects[i], true);
+            retSubjects = retSubjects && tmp;
+        }
+
+        var retFromResource = true;
+
+        if (retSubjects) {
+            var tmp = checkOwnerSingle(policy);
+            if (tmp) {
+                policy['Enforcement'] = 'allow';
+                return true;
+            }
+
+            for (var i = 0; i < policy.FromResource.length; ++i) {
+                retFromResource = retFromResource && evalSubjectOrResource(policy.FromResource[i], false);
+            }
+        }
+
+        var retExpression = true;
+        if (policy.expression) {
+            retExpression = evalAdvancedCondition(policy.expression);
+        }
+        // SEUtil.debug('Decision/evalPolicy', '{0}: SubjectEval={1}, ResourceEval={2}, AdvancedConditionEval={3}', Decision.current.getDisplayValue(),
+        //     retSubjects, retFromResource, retExpression);
+        return retSubjects && retFromResource && retExpression;
+    }
+
+    function evalSubjectOrResource(subject, isUser) {
+
+        var ret = false;
+        for (var i = 0; i < subject.Components.length; ++i) {
+            ret = ret || evalComponent(subject.Components[i], isUser);
+        }
+        switch (subject.Operator) {
+            case "IN":
+                {
+                    return ret;
+                    break;
+                }
+            case "NOT":
+                {
+                    return !ret;
+                    break;
+                }
+            default:
+                return true;
+        }
+    }
+
+    function check(str) {
+        if (str.charAt(0) == "$") {
+            if (str.charAt(1) == "{" && str.charAt(str.length - 1) == "}") {
+                return str.substring(2, str.length - 1);
+            } else {
+                return str.substring(1);
+            }
+        } else {
+            return str;
+        }
+    }
+
+    function getCEAttributesOfUser(userId, outUser) {
+        var userDict = SEUtil.getProperty('UserAttributes');
+        var ceAttrs = {} //new CEAttres();
+        // gs.nil(Object o): Queries an object and returns true if the object is null, undefined, or contains an empty string.
+        if (gs.nil(userDict) && !userDict.length) {
+            return ceAttrs;
+        }
+        userDict = JSON.parse(userDict);
+
+        var SN_TBL_USER = 'sys_user';
+        // var prefixLen = 'sys_user.'.length;
+        var grUser = new GlideRecordSecure(SN_TBL_USER);
+        if (!grUser.get(userId || gs.getUserID())) {
+            return ceAttrs;
+        }
+        for (var idx = 0, len = userDict.length; idx < len; ++idx) {
+            var userAttr = userDict[idx];
+
+            //if ('name' === userAttr.column_name || !userAttr.active) continue; // we have added it as name of CEUser
+            if (!userAttr.active) continue;
+
+            var fieldName = userAttr.column_name; // userAttr.column_name.substr(prefixLen);
+            var value = SEUtil.derefGet(grUser, fieldName, '-');
+
+            // // :value undefined, xx string, , ...
+            //if (SEUtil.isArray(value)) { //org.mozilla.javascript.NativeArray
+            //    value = value.toString(); // or value.join(',')
+            //} else if(!value.nil()){}
+            if (!gs.nil(value)) {
+                value = value.toString();
+            }
+
+            // gs.info('[-_^]USER: {0} = {1}', fieldName, value);
+            if (!gs.nil(value)) {
+
+                if (outUser) {
+                    outUser[fieldName] = value;
+                }
+            }
+        }
+        return ceAttrs;
+    }
+
+    function getUserValue(key) {
+        // var ret = SEUtil.derefOpt(Decision.objUser, key);
+        var ret = Decision.objUser['get'](key);
+        SEUtil.debug('[-_^]getUserValue', key + ' = ' + ret);
+        if (undefined == ret) {
+            // {0} does not exists or is not secured in table {1}.
+            SEUtil.error('Decision/getUserValue', '{0} not exist or not secured in User Attributes', key);
+        }
+        return ret;
+    }
+
+    function cacheResKey(current) {
+        if (Decision.res == null) {
+            Decision.res = {};
+        }
+        if (gs.nil(current)) {
+            //gs.debug(('gs.nil(Decision.current)'));
+            return;
+        }
+
+        var fieldName;
+        var fieldAttrs = {};
+        var grColumn = new GlideRecordSecure(SEUtil.MY_SCOPE_NAME + '_entitycolumn');
+        //gs.debug('Decision.current.getTableName(): ' + Decision.current);
+        grColumn.addQuery('name', current.getTableName());
+        grColumn.query();
+        while (grColumn.next()) {
+            fieldName = grColumn.getValue('column');
+            if (!gs.nil(grColumn.column)) {
+                fieldAttrs[fieldName] = grColumn.getValue('type');
+            }
+        }
+        Decision.res[current.getTableName()] = fieldAttrs;
+        //gs.debug('Decision.res: ' + JSON.stringify(Decision.res));
+    }
+
+    function isResKeyValid(key) {
+        if (gs.nil(Decision.current)) {
+            return false;
+        }
+        //gs.debug('Decision.current: ' + JSON.stringify(Decision.res));
+        return Decision.res[Decision.current.getTableName()][key] != null;
+    }
+
+    function getResValue(key) {
+        if (!isResKeyValid(key)) {
+            // {0} does not exists or is not secured in table {1}.
+            SEUtil.error('Decision/getResValue', '{0} not exist or not secured in table {1}', key, Decision.current.getTableName());
+            return null;
+        }
+        if (Decision.current instanceof Enforcer.AttributeStack) {
+            return Decision.current['get'](key);
+        }
+        var ret = SEUtil.derefOpt(Decision.current, key);
+        if (ret.toString) {
+            return ret.toString();
+        } else {
+            return ret;
+        }
+    }
+
+    /**
+     * Retrieves a variable value specified by `key` in the current context.
+     * @param {string} key the dot-walking field name. Format represented in regex-like: `user.userTableColumnName(-xrefTableColumnName)*`, `resource.tableName(.columnName)+`.
+     *  e.g. user.department-name, resource.incident.caller_id.department.name
+     * @param {boolean} [isUser] a helper to indicate that key is a field name of the user table if the specified `key` doesn't start with the two keywords `user` and `resource`.
+     * @return {GlideElement|string|null|undefined}
+     */
+    function getValue(key, isUser) {
+        var columnNames, names = key.split('.');
+        var firstKey = names[0].toLowerCase();
+        if ('user' == firstKey) {
+            columnNames = names.slice(1);
+            key = columnNames.join('.');
+            // gs.debug('Decision|getValue|user: ' + key);
+            return getUserValue(key);
+        } else if ('resource' == firstKey) {
+            columnNames = names.slice(2);
+            key = columnNames.join('.');
+            // gs.debug('Decision|getValue|resource: ' + key);
+            //return SEUtil.derefOpt(Decision.current, arr1.join('.'));
+            return getResValue(key);
+        } else {
+            // gs.debug('Decision|getValue|' + isUser + ': ' + key);
+            if (isUser) {
+                return getUserValue(key);
+            } else {
+                return getResValue(key);
+            }
+        }
+    }
+
+    function getConditionLeftValue(condition, isUser) {
+        // todo 
+        var attr = condition.attribute;
+        return getValue(attr, isUser);
+    }
+
+    function getConditionRightValue(condition, isUser) {
+        // todo
+        var checkValue = check(condition.value);
+        if (checkValue == condition.value) {
+            return condition.value;
+        } else {
+            return getValue(checkValue, isUser);
+        }
+    }
+
+    function evalCondition(condition, isUser) {
+        var ret = true;
+        var left = getConditionLeftValue(condition, isUser);
+        var right = getConditionRightValue(condition, isUser);
+		var rightValueIsNull = false;
+
+        gs.debug("evalCondition: " + JSON.stringify(condition) + ", leftValue = " + left + ", rightValue = " + right);
+
+        if (!gs.nil(right)){
+			if (right.toLowerCase() == 'null') {				
+			    gs.debug('rightValue is null');
+			    rightValueIsNull = true;
+		    }
+		}else if (gs.nil(left) || gs.nil(right)) {
+            return false;
+        }
+        switch (condition.operator) {
+            case "=":
+                {
+                    gs.debug("evalCondition: typeof (left)=" + typeof (left) + ", (left == right) = " + (left == right));
+					if (rightValueIsNull) {
+						if (gs.nil(left)) return true;
+						return false;
+					}
+					
+                    if (typeof (left) == 'string') {
+                        return left.toLowerCase() == right.toLowerCase();
+                    } else {
+                        return left == right;
+                    }
+
+                    break;
+                }
+            case "!=":
+                {
+                    gs.debug("evalCondition: typeof (left)=" + typeof (left) + ", (left != right) = " + (left != right));
+					if (rightValueIsNull) {
+						if (gs.nil(left)) return false;
+						return true;						
+					}
+					
+					if (typeof (left) == 'string') {
+                        return left.toLowerCase() != right.toLowerCase();
+                    } else {
+                        return left != right;
+                    }
+                    break;
+                }
+            case ">":
+                {
+					if (rightValueIsNull) {						
+                        SEUtil.error('Decision/evalCondition', 'should not use operator {0} to compare leftValue {1} with null', condition.operator, left);						
+                        return false;	
+					}					
+                    left = Number(left);
+                    right = Number(right);
+                    return left > right;
+                    break;
+                }
+            case "<":
+                {
+					if (rightValueIsNull) {						
+                        SEUtil.error('Decision/evalCondition', 'should not use operator {0} to compare leftValue {1} with null', condition.operator, left);						
+                        return false;	
+					}				
+                    left = Number(left);
+                    right = Number(right);
+                    return left < right;
+                    break;
+                }
+            case "<=":
+                {
+					if (rightValueIsNull) {						
+                        SEUtil.error('Decision/evalCondition', 'should not use operator {0} to compare leftValue {1} with null', condition.operator, left);						
+                        return false;	
+					}				
+                    left = Number(left);
+                    right = Number(right);
+                    return left <= right;
+                    break;
+                }
+            case ">=":
+                {
+					if (rightValueIsNull) {						
+                        SEUtil.error('Decision/evalCondition', 'should not use operator {0} to compare leftValue {1} with null', condition.operator, left);						
+                        return false;	
+					}				
+                    left = Number(left);
+                    right = Number(right);
+                    return left >= right;
+                    break;
+                }
+            case "includes":
+                {
+					if (rightValueIsNull) {						
+                        SEUtil.error('Decision/evalCondition', 'should not use operator {0} to compare leftValue {1} with null', condition.operator, left);						
+                        return false;	
+					}				
+                    var leftarr = left.toLowerCase().split(',');
+                    if (typeof (right) == 'string') {
+                        right = right.toLowerCase();
+                    }
+                    if (-1 != leftarr.indexOf(right)) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                    break;
+                }
+            default:
+                return true;
+
+        }
+    }
+
+    function evalComponent(component, isUser) {
+        var ret = true;
+        for (var i = 0; i < component.Conditions.length; ++i) {
+            ret = ret && evalCondition(component.Conditions[i], isUser)
+        }
+        return ret;
+    }
+})();
+
+/**
+ * An Query Condition,  When it's used to `GlideQueryCondition`, Value on which to query is not case-sensitive.
+ * @typedef {Object} FilterCondition
+ * @property {string} field a field name (Use [dot-walking](https://docs.servicenow.com/bundle/bundle/jakarta-platform-user-interface/page/use/navigation/concept/c_DotWalking.html)
+ *  to access values in a table, including the referenced table.)
+ * @property {string} operator A comparison operators/relational operator are used to perform arithmetic on variables and numbers (literals or variables). The available values are
+ * dependent on the data type of the value parameter. = (Equal), != (Not equal), > (Greater than), >= (Greater than or equal), < (Less than), <= (Less than or equal).
+ * @property {string} value the right value to compare with
+ * @see https://en.wikipedia.org/wiki/Operators_in_C_and_C%2B%2B#Comparison_operators.2Frelational_operators
+ * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Expressions_and_Operators#Comparison_operators
+ * @see https://docs.servicenow.com/bundle/jakarta-servicenow-platform/page/script/server-scripting/concept/c_ReferenceQualifiers.html#c_ReferenceQualifiers
+ * @see https://docs.servicenow.com/bundle/jakarta-platform-user-interface/page/use/using-lists/concept/c_UsingORConditions.html
+ * @see https://docs.servicenow.com/bundle/jakarta-platform-user-interface/page/use/using-lists/concept/c_Filters.html
+ * @see https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideRecordScoped/concept/c_GlideRecordScopedAPI.html#r_ScopedGlideRecordAddQuery_String_String_Object
+ * @see https://docs.servicenow.com/bundle/jakarta-application-development/page/app-store/dev_portal/API_reference/glideQueryConditionScoped/concept/c_GlideQueryConditionScopedAPI.html#r_ScopedGlideQueryConditionOrAddCondition_String_name_String_oper_Object_value
+ */
+
+/**
+ * A component group. A user-configured policy can have many components and they are grouped.
+ * @typedef ComponentGroup
+ * @type {Object}
+ * @property {'IN'|'NOT'} Operator A combinatorial (inclusion–exclusion) operator indicates components can be included (In) or excluded (Not In) from policy effects.
+ * @property {Component[]} Components A set of user-configured components
+ */
+
+/**
+ * A user-configured subject component or resource component
+ * @typedef Component
+ * @type {Object}
+ * @property {string} name the component name
+ * @property {AttributeComparison[]} Conditions A set of attribute conditions
+ */
+
+/**
+ * @typedef AttributeComparison
+ * @type {Object}
+ * @property {string} attribute The field name. e.g. calendar_integration
+ * @property {string} operator A comparison operators/relational operator are used to perform arithmetic on variables and numbers (literals or variables).
+ *  The available values are dependent on the data type of the value parameter. e.g. !=
+ * @property {string} value The value to compare to e.g. "1", "admin@example.com"
+ */
+
+/**
+ * The user-configured obligation
+ * @typedef  {Object} PolicyObigation
+ * @property {string} name The obigation name. e.g. log
+ * @property {Object} params The obigation parameters. The available values are dependent on the obigation name.
+ */
+
+/**
+ * A user-configured policy
+ * @typedef Policy
+ * @type {Object}
+ * @property {string} name The policy name
+ * @property {number} ID The unique ID
+ * @property {{name: string}[]} Actions A set of actions
+ * @property {ComponentGroup[]} Subjects The Subject Components
+ * @property {ComponentGroup[]} FromResource The Resource Components
+ * @property {'allow'|'deny'} Enforcement
+ * @property {string|null} expression ADVANCED CONDITIONS e.g. `"(resource.incident.priority = \"2\" AND resource.incident.category = \"hardware\")"`
+ * @property {PolicyObigation[]} AllowObigations
+ * @property {PolicyObigation[]} denyObligations
+ * @example
+```json 
+{
+    "name": "only \"compliance officer\" should be allowed to view incidents of which business service is \"compliance\".",
+    "ID": 35163,
+    "Enforcement": "allow",
+    "Actions": [{ "name": "INCIDENT_VIEW" }],
+    "FromResource": [{
+        "Operator": "IN",
+        "Components": [{
+            "name": "Calendar integration",
+            "Conditions": [{
+                "attribute": "calendar_integration",
+                "operator": "!=",
+                "value": "1"
+            }]
+        }, {
+            "name": "Admin-email",
+            "Conditions": [{
+                "attribute": "email",
+                "operator": "=",
+                "value": "admin@example.com"
+            }]
+        }]
+    }, {
+        "Operator": "NOT",
+        "Components": [{
+            "name": "don-email",
+            "Conditions": [{
+                "attribute": "email",
+                "operator": "=",
+                "value": "don.goodliffe@example.com"
+            }]
+        }, {
+            "name": "department=Market",
+            "Conditions": []
+        }]
+    }]
+}
+```
+ */]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-10-10 01:52:10</sys_created_on>
+        <sys_id>f7b2bc79dbc92300fdfc87423996193f</sys_id>
+        <sys_mod_count>47</sys_mod_count>
+        <sys_name>Decision</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy>read</sys_policy>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_script_include_f7b2bc79dbc92300fdfc87423996193f</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-03-24 06:38:10</sys_updated_on>
+    </sys_script_include>
+</record_update>

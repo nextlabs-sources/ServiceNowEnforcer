@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="oauth_entity_profile">
+    <oauth_entity_profile action="INSERT_OR_UPDATE">
+        <default>true</default>
+        <grant_type>client_credentials</grant_type>
+        <name>PDPToken</name>
+        <oauth_entity display_value="PDP OAuth2">57a83c9c4f030300b44b00f18110c7e6</oauth_entity>
+        <sys_class_name>oauth_entity_profile</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-12-11 04:13:41</sys_created_on>
+        <sys_id>f7a870184f030300b44b00f18110c742</sys_id>
+        <sys_mod_count>1</sys_mod_count>
+        <sys_name>PDPToken</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>oauth_entity_profile_f7a870184f030300b44b00f18110c742</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2017-12-11 04:14:24</sys_updated_on>
+    </oauth_entity_profile>
+</record_update>

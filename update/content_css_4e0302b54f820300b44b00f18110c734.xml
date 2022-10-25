@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="content_css">
+    <content_css action="INSERT_OR_UPDATE">
+        <name>general-settings.css</name>
+        <style>/* ------layouts------ */&#13;
+.content-header{&#13;
+    padding: 20px;&#13;
+    height: auto;&#13;
+}&#13;
+.content-body{&#13;
+    padding: 0 40px;&#13;
+}&#13;
+.content-footer{&#13;
+    height: 100px;&#13;
+    line-height: 100px;&#13;
+    padding: 0 40px;&#13;
+    background-image: url('/nxl_bg_shadow.png');&#13;
+    background-size: 100% 100%;&#13;
+    background-repeat: no-repeat;&#13;
+}&#13;
+&#13;
+/* ------modules------ */&#13;
+.content-header-avatar{&#13;
+    width: 64px;&#13;
+    height: auto;&#13;
+    margin: 10px 20px;&#13;
+}&#13;
+.content-title-wrap{&#13;
+    &#13;
+}&#13;
+.content-title{&#13;
+    margin: 0;&#13;
+    padding: 10px 0;&#13;
+}&#13;
+.content-title-desc{&#13;
+    margin: 0;&#13;
+    color: #999;&#13;
+}&#13;
+.sep-title-h{&#13;
+    background-color: #ddd;&#13;
+    border: 0;&#13;
+    height: 1px;&#13;
+}&#13;
+.sep-section-h{&#13;
+    background-image: url('/nxl_sep_shadow.png');&#13;
+    background-size: 100% 100%;&#13;
+    background-repeat: no-repeat;&#13;
+    border: 0;&#13;
+    height: 30px;&#13;
+}&#13;
+.section-title-wrap{&#13;
+    width: 80%;&#13;
+}&#13;
+.section-title{&#13;
+    margin: 0;&#13;
+    padding: 10px 0;&#13;
+}&#13;
+.section-title-desc{&#13;
+    margin: 0 0 10px 0;&#13;
+    color: #999;&#13;
+}&#13;
+.section-sub-title-wrap{&#13;
+    width: 60%;&#13;
+}&#13;
+.form-control-group{&#13;
+    padding: 10px 0;&#13;
+}&#13;
+.form-control{&#13;
+    margin: 5px 0;&#13;
+    overflow: hidden;&#13;
+}&#13;
+.form-label{&#13;
+    line-height: 16px;&#13;
+}&#13;
+.form-input{&#13;
+    width: 60%;&#13;
+    padding: 4px;&#13;
+    border: 1px solid #ddd;&#13;
+}&#13;
+.form-input-inline{&#13;
+    width: 64px;&#13;
+    height: 16px;&#13;
+    padding: 4px;&#13;
+    border: 1px solid #ddd;&#13;
+    text-align: center;&#13;
+}&#13;
+.form-submit{&#13;
+    width: 140px;&#13;
+    height: 30px;&#13;
+    line-height: 30px;&#13;
+    text-align: center;&#13;
+}&#13;
+.form-select{&#13;
+    width: 140px;&#13;
+    height: 30px;&#13;
+    line-height: 30px;&#13;
+    text-align: center;    &#13;
+}&#13;
+.form-textarea{&#13;
+    width: 60%;&#13;
+    height: 52px;&#13;
+    padding: 4px;&#13;
+    border: 1px solid #ddd;&#13;
+    resize: none;&#13;
+}&#13;
+.https-input{&#13;
+    width: 40%;&#13;
+}&#13;
+.https-wrap{&#13;
+    padding: 0 10px;&#13;
+    margin: 5px 0;&#13;
+}&#13;
+.https-wrap &gt; input[type=checkbox]{&#13;
+    width: 24px;&#13;
+    height: 24px;&#13;
+    vertical-align: top;&#13;
+    margin: 0;&#13;
+    padding: 0;&#13;
+}&#13;
+.https-wrap &gt; label{&#13;
+    line-height: 24px;&#13;
+}</style>
+        <sys_class_name>content_css</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2017-10-27 08:22:13</sys_created_on>
+        <sys_id>4e0302b54f820300b44b00f18110c734</sys_id>
+        <sys_mod_count>4</sys_mod_count>
+        <sys_name>general-settings.css</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>content_css_4e0302b54f820300b44b00f18110c734</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2017-11-02 02:23:00</sys_updated_on>
+        <type>local</type>
+        <url/>
+    </content_css>
+</record_update>

@@ -1,0 +1,686 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>package_private</access>
+        <active>true</active>
+        <api_name>x_230565_emsn.PolicyHelper</api_name>
+        <client_callable>true</client_callable>
+        <description/>
+        <name>PolicyHelper</name>
+        <script><![CDATA[var POLICY_TABLE = 'nxl_policies'
+var ACTION_SUFFIXES = ['VIEW', 'CREATE', 'EDIT', 'DELETE']
+var PolicyHelper = Class.create()
+
+PolicyHelper.prototype = Object.extendsObject(global.AbstractAjaxProcessor, {
+
+    //initialize: function () { },
+    type: 'PolicyHelper',
+    retried: false,
+    count: 0,
+    
+	// getDate
+ getDate: function(){
+	var date = new Date();
+var y =  date.getUTCFullYear();
+var m = date.getUTCMonth() ;
+var d = date.getUTCDate();
+var h= date.getUTCHours();
+var M = date.getUTCMinutes();
+var s = date.getUTCSeconds();
+var utc = Date.UTC(y,m,d,h,M,s);
+	 return utc;
+},
+    syncPolicies: function () {
+        SEUtil.debug('PolicyHelper.syncPolicies', 'ENTRYPOINT');
+        this._emptyPolicy();
+        try {
+            if(this.SyncPolicyWithTag(['servicenow', 'EMSN'])){
+				SEUtil.saveProperty('SyncPolicySuccess',this.getDate(),'syncPolicySuccessResult');
+				return true;				
+			}
+			else{
+				SEUtil.saveProperty('SyncPolicyFailed',this.getDate(),'syncPolicyFailedResult');
+				return false;
+			}
+        } catch (e) {
+			SEUtil.saveProperty('SyncPolicyFailed',this.getDate(),'syncPolicyFailedResult');
+            // SEUtil.debug('PolicyHelper.syncPolicies exception:', e.message);
+            SEUtil.logThrow('PolicyHelper.syncPolicies', e);
+			return false;
+        }
+        SEUtil.debug('PolicyHelper.syncPolicies', 'LEAVE');
+    },
+
+    SyncPolicyWithTag: function (policytag) {
+
+        var ComCCandPC = new CommunicateWithCCAndPC();
+        var ComConsole = new CommunicateWithWebConsole();
+
+        //login to web console
+        var username = SEUtil.getProperty('UserName');
+        var password = SEUtil.getProperty('Password');
+        var ccBaseURL = ComCCandPC.GetCC();
+        if (!ccBaseURL) {
+            SEUtil.error('PolicyHelper.SyncPolicyWithTag', 'illegal host');
+            return false;
+        }
+        if (!username) {
+            SEUtil.error('PolicyHelper.SyncPolicyWithTag', 'empty user name');
+            return false;
+        }
+        if (!password) {
+            SEUtil.error('PolicyHelper.SyncPolicyWithTag', 'empty password');
+            return false;
+        }
+		var strConsoleCookie = ComConsole.LoginWebConsole(ccBaseURL + "/console", username, password);
+		//SEUtil.debug('Cookie', strConsoleCookie);
+		//var strConsoleCookie = "JSESSIONID=E88F66A0CA8F582F43B6FDF2126564BF; Path=/console; Secure; HttpOnly";
+		if (!strConsoleCookie || 0 > strConsoleCookie.indexOf('JSESSIONID=')) {
+		    SEUtil.error('PolicyHelper.SyncPolicyWithTag', 'cannot acquire the access authorization credentials for the user {0} at {1}', username, ccBaseURL);
+		    return false;
+		}
+		//get api address
+		var strAPISerarchPolicy = ComCCandPC.GetSearchPolicyAPI();
+		var strAPIQueryPolicy = ComCCandPC.GetQueryPolicyDetailAPI();
+		var strAPIQueryComponent = ComCCandPC.GetQueryComponentDetailAPI();
+		
+	
+		//search and save policy
+		var pagesize = 20;
+		
+		var searchCriteria = {
+		    criteria: {
+		        fields: [{
+		            field: "tags",
+		            nestedField: "tags.key",
+		            type: "NESTED_MULTI",
+		            value: {
+		                type: "String",
+		                value: policytag //set search with tag
+		            }
+		        }, {
+		            field: "status",
+		            type: "MULTI",
+		            value: {
+		                type: "String",
+		                value: ["APPROVED"]
+		            }
+		        }],
+		        sortFields: [{
+		            field: "lastUpdatedDate",
+		            order: "DESC"
+		        }],
+		        pageNo: 0,
+		        pageSize: 20
+		    }
+		};
+
+		var nPageNum = 0;
+		while(true){
+			//search policy list with tag
+			searchCriteria.criteria.pageNo = nPageNum;
+			searchCriteria.criteria.pageSize = pagesize;
+			
+			var policyResponse = ComConsole.SendPostRequestToConsole(strAPISerarchPolicy, strConsoleCookie, "application/json;charset=UTF-8",  JSON.stringify(searchCriteria));
+            if (!policyResponse) {
+                SEUtil.error('PolicyHelper.SyncPolicyWithTag', 'Failed to get policy list from {0}', ccBaseURL);
+                return false;
+            }
+			var policyData = JSON.parse(policyResponse);
+			var policyList = policyData.data;
+			 
+		    for (var policyIndex = 0; policyIndex < policyList.length; policyIndex++) {
+		        var curPolicy = policyList[policyIndex];
+
+		        var nxlPolicy = new NxlPolicy();
+
+		        nxlPolicy.name = curPolicy.lowercase_name;
+		        nxlPolicy.ID = curPolicy.id;
+		        nxlPolicy.Enforcement = curPolicy.effectType;
+
+		        //query for policy
+		        var jsonPolicyDetail = ComConsole.SendGetRequestToConsole(strAPIQueryPolicy + curPolicy.id, strConsoleCookie);
+		        //SEUtil.debug('PolicyDetail',  jsonPolicyDetail);
+		        var policyDetail = JSON.parse(jsonPolicyDetail);
+		        if (policyDetail && policyDetail.data) {
+		            var policyDetailData = policyDetail.data;
+		            //action, subject, resource
+		            if (policyDetailData.actionComponents && policyDetailData.actionComponents.length) {
+		                var jsonActions = policyDetailData.actionComponents[0].components;
+		                //query for action component
+		                nxlPolicy.Actions = this.QueryActionComponents(ComConsole, strAPIQueryComponent, strConsoleCookie, jsonActions);
+		            } else {
+		                // nxlPolicy.Actions = [];
+		                // SEUtil.warn('PolicyHelper#SyncPolicyWithTag', 'Policy {0}@{1} action is empty: {2}', curPolicy.lowercase_name, curPolicy.id, jsonPolicyDetail);
+		                continue;
+		            }
+
+		            var jsonSubjects = policyDetailData.subjectComponents;
+		            var jsonFromResource = policyDetailData.fromResourceComponents;
+
+		            //query for subject component
+		            nxlPolicy.Subjects = this.QuerySubjectComponents(ComConsole, strAPIQueryComponent, strConsoleCookie, jsonSubjects);
+		            //query for resource component
+		            nxlPolicy.FromResource = this.QueryResourceComponents(ComConsole, strAPIQueryComponent, strConsoleCookie, jsonFromResource);
+
+		            //advance conditions
+		            nxlPolicy.expression = policyDetailData.expression;
+
+		            //obligations
+		            nxlPolicy.AllowObigations = this.GetObligations(policyDetailData.allowObligations);
+		            nxlPolicy.denyObligations = this.GetObligations(policyDetailData.denyObligations);
+
+		            //SEUtil.debug('NxlPolicy',  JSON.stringify(nxlPolicy));
+
+		            //save policy
+		            this.SaveNxlPolicy(nxlPolicy);
+		        } else {
+		            SEUtil.warn('PolicyHelper#SyncPolicyWithTag', 'Policy {0}@{1} data is empty: {2}', curPolicy.lowercase_name, curPolicy.id, jsonPolicyDetail);
+					return false;
+		        }
+		        }
+				
+			
+		  //check if need next search policy
+		  if(policyData.totalPages == policyData.pageNo+1 ){
+				  break;
+		   }
+			
+		   nPageNum++; //search next page  
+					
+			
+		}//while
+		return true;	
+	},
+	
+	SaveNxlPolicy:function(nxlPolicy){
+	
+		var strAction = "";
+		var actions = nxlPolicy.Actions;
+		actions.forEach(function(action, actIndex, actArray){
+			strAction = strAction + action.name + ",";
+		});
+		
+		var policyname = nxlPolicy.name;
+		var strPolicy = JSON.stringify(nxlPolicy);
+		
+		 if (!nxlPolicy || !policyname || !strAction) {
+            SEUtil.debug('PolicyHelper.SaveNxlPolicy', 'invalid argument: action:' + strAction +',policyname:' + policyname + ',policy:' + strPolicy);
+            return false;
+        }
+       
+        var target = new GlideRecordSecure(gs.getCurrentScopeName() + '_' + POLICY_TABLE)
+
+        target.initialize();
+        target.id = policyname;
+        target.action = strAction;
+        target.policy =  strPolicy;
+        target.insert();
+			
+	},
+	
+	GetObligations:function(consoleObs){
+	
+		var obArray = new Array();
+		
+		consoleObs.forEach(function(consoleob, obindex, consoleObArray){
+		     var nxlOb = new NxlObligation();
+			nxlOb.name = consoleob.name;
+			nxlOb.params = consoleob.params;
+			
+			obArray.push(nxlOb);
+		});
+		
+		return obArray;
+	},
+	
+	QueryResourceComponents:function(ComConsole,strAPI, strCookie, jsonResource){
+		var _self = this;
+		var ResourceArray = new Array();
+				
+		jsonResource.forEach(function(Resource, resIndex,resArray){
+			  
+			    var nxlResource = new NxlResource();
+			    nxlResource.Operator = Resource.operator;
+			
+			    nxlResource.Components = new Array();
+			
+			    var components = Resource.components;
+			    components.forEach(function(component, compIndex, compArray){
+					
+			   var componentObj= JSON.parse(ComConsole.SendGetRequestToConsole(strAPI + component.id, strCookie) );
+			
+			    var nxlComponent = new NxlComponent();
+					nxlComponent.name = componentObj.data.name;
+					nxlComponent.Conditions = _self.GetConditionsFromComponent(componentObj);
+					nxlResource.Components.push(nxlComponent);
+				});
+			    
+			    ResourceArray.push(nxlResource);
+		});
+		return ResourceArray;	
+		
+	},
+	
+		QuerySubjectComponents:function(ComConsole,strAPI, strCookie, jsonSubjects){
+		var _self = this;
+		var subjectArray = new Array();
+				
+		jsonSubjects.forEach(function(subject, subindex,subArray){
+			  
+			    var nxlSubject = new NxlSubject();
+			    nxlSubject.Operator = subject.operator;
+			
+			    nxlSubject.Components = new Array();
+			
+			    var components = subject.components;
+			    components.forEach(function(component, compIndex, compArray){
+					
+			   var componentObj= JSON.parse(ComConsole.SendGetRequestToConsole(strAPI + component.id, strCookie) );
+			
+			    var nxlComponent = new NxlComponent();
+					nxlComponent.name = componentObj.data.name;
+					nxlComponent.Conditions = _self.GetConditionsFromComponent(componentObj);
+					nxlSubject.Components.push(nxlComponent);
+				});
+			    
+			    subjectArray.push(nxlSubject);
+		});
+		return subjectArray;	
+	},
+	
+	GetConditionsFromComponent:function(componentObj){
+		var conditionArray = new Array();
+		
+		var conditions = componentObj.data.conditions;
+		for(var i=0; i<conditions.length; i++){
+			var nxlCondition = new NxlCondition();
+			nxlCondition.attribute = conditions[i].attribute;
+			nxlCondition.operator = conditions[i].operator;
+			nxlCondition.value = conditions[i].value;
+			
+			conditionArray.push(nxlCondition);
+		}
+		
+		return conditionArray;
+	},
+	
+	QueryActionComponents:function(ComConsole,strAPI, strCookie, jsonActions){	
+		var actionArray = new Array();
+		
+		jsonActions.forEach(function(action,index,array){
+			    var actionResponse = ComConsole.SendGetRequestToConsole(strAPI + action.id, strCookie);
+			   // SEUtil.debug('ActinResponse',  actionResponse);
+				var jsonActionDetail = JSON.parse(ComConsole.SendGetRequestToConsole(strAPI + action.id, strCookie));
+			    var nxlAction = new NxlAction();
+			    nxlAction.name = jsonActionDetail.data.actions[0];
+			    
+			    actionArray.push(nxlAction);
+		});
+		return actionArray;	
+	},
+	
+    syncPolicies_old: function () {
+        SEUtil.debug('PolicyHelper.syncPolicies', 'ENTRYPOINT');
+        var _self = this
+        var users = _self._listUsers()
+        var tables = _self._getEnforcedTables()
+
+        this._emptyPolicy()
+        this._queryMultiplePolicies(users, tables)
+        // for (var i = 0; i < users.length; i++) {
+        //     for (var j = 0; j < tables.length; j++) {
+        //         for (var k = 0; k < ACTION_SUFFIXES.length; k++) {
+        //             var actionName = tables[j].toUpperCase() + '_' + ACTION_SUFFIXES[k]
+        //             var id = users[i].id
+        //             var policy = _self._queryPolicy(users[i], actionName)
+        //             policy && _self._savePolicy(id, actionName, policy)
+        //         }
+        //     }
+        // }
+        SEUtil.debug('PolicyHelper.syncPolicies', 'LEAVE');
+    },
+
+    /**
+     * @return { string[] }
+     */
+    _getEnforcedUserAttributes: function () {
+        var attrs = []
+        var strEnforcedAttr = gs.getProperty(gs.getCurrentScopeName() + '.UserAttributes', null)
+
+        try {
+            var enforcedAttrs = JSON.parse(strEnforcedAttr)
+            enforcedAttrs.forEach(function (attr) {
+                attrs.push(attr.column_name.replace(/\-/g, '.'))
+            })
+        } catch (e) {
+            SEUtil.debug('PolicyHelper._getEnforcedUserAttributes', 'ENTRY, callerScopeName={0}, currentScopeName={1}', gs.getCallerScopeName(), gs.getCurrentScopeName());
+        }
+
+        return attrs
+    },
+
+    _getEnforcedTables: function () {
+        var tableDict = {}
+        var target = new GlideRecordSecure(gs.getCurrentScopeName() + '_' + 'entitycolumn')
+
+        target.addNotNullQuery('name')
+        target.query()
+        while (target.next()) {
+            tableDict[target.getValue('name')] = 1
+        }
+
+        return Object.keys(tableDict)
+    },
+
+    /**
+     * @returns { object[] }
+     */
+    _listUsers: function () {
+        var enforcedAttrs = this._getEnforcedUserAttributes()
+        var users = []
+        var target = new GlideRecordSecure('sys_user')
+
+        target.query()
+        while (target.next()) {
+            var user = {}
+            user.id = target.getValue('sys_id')
+            user.name = target.getValue('name')
+            enforcedAttrs.forEach(function (attr) {
+                user[attr.replace(/\./g, '-')] = target.getElement(attr).toString()
+            })
+
+            if (user.id) {
+                users.push(user)
+            }
+        }
+
+        return users
+    },
+
+    /**
+     * @returns { string[] }
+     */
+    _listTables: function () {
+        var tables = []
+        var target = new GlideRecordSecure('sys_db_object')
+        target.addNotNullQuery('name')
+        //target.addQuery('sys_scope.scope', gs.getCurrentScopeName())
+        target.query()
+
+        while (target.next()) {
+            tables.push(target.getValue('name'))
+        }
+
+        return tables
+    },
+
+    /**
+     * @param { string } attrType
+     * @return { string }
+     */
+    _getXACMLType: function (attrType) {
+        switch (attrType) {
+            case 'boolean': return CEAttributeType.XACML_Boolean
+            case 'number': return Math.floor(value) === value ? CEAttributeType.XACML_Integer : CEAttributeType.XACML_Double
+            default: return CEAttributeType.XACML_String
+        }
+    },
+
+    /**
+     * @param { object } user
+     * @param { string } actionName
+     * @return { object }
+     */
+    _queryPolicy: function (user, actionName) {
+
+        if (!user || !user.id || !actionName) {
+            SEUtil.debug('PolicyHelper._queryPolicy', 'ENTRY, callerScopeName={0}, currentScopeName={1}', gs.getCallerScopeName(), gs.getCurrentScopeName())
+            return
+        }
+
+        SEUtil.debug('*****************', 'No. {0}, user: {1}, action: {2}', ++this.count, user.name, actionName)
+
+        //import namespace
+        var dummy = CommunicateWithCCAndPC
+        var _self = this
+        var gdtBGN = new GlideDateTime(),
+            gdtEND,
+            elapsedMs,
+            result,
+            timeoutMs = 3000,
+            global = 'rhino.global' === gs.getCurrentScopeName()
+
+        try {
+            var url = CommunicateWithCCAndPC.getPc()
+            var token_type = 'Bearer'
+            var access_token = TokenOAuthCC.getToken(global)
+            var request = new sn_ws.RESTMessageV2();
+            var jpcRequest = new JPCRequest();
+            var ceAttrs = new CEAttres();
+
+            Object.keys(user).forEach(function (prop) {
+                ceAttrs.Add_Attre(prop, user[prop], _self._getXACMLType(typeof user[prop]));
+            });
+
+            var ceUser = new CEUser(user.id, user.name, ceAttrs);
+            var ceRes = new CEResource('current', user.id, new CEAttres());
+            jpcRequest.Set_User(ceUser);
+            jpcRequest.Set_Action(actionName.toUpperCase());
+            jpcRequest.Set_Source(ceRes);
+
+            var requestBody = TransformToSingleRequest(jpcRequest)
+
+            request.setEndpoint(url);
+            request.setHttpMethod('POST');
+            request.setRequestHeader('Content-Type', 'application/json');
+            request.setRequestHeader('Service', 'EVAL');
+            request.setRequestHeader('Version', '1.0');
+            request.setRequestHeader("Authorization", token_type + ' ' + access_token);
+            request.setRequestBody(JSON.stringify(requestBody));
+            request.setHttpTimeout(timeoutMs)
+
+            var response = request.execute()//global ? request.execute() : request.executeAsync();
+
+            if (response.haveError()) {
+
+                var errmsg = response.getErrorMessage()
+
+                SEUtil.error('PolicyHelper._queryPolicy', 'errcode=' + response.getStatusCode() + ', errmsg=' + errmsg);
+
+                if (401 == response.getStatusCode()) {
+                    if (!this.retried) {
+                        this.retried = true
+                        TokenOAuthCC.forceRefreshToken();
+                        return this._queryPolicy(user, actionName);
+                    } else {
+                        SEUtil.error('PolicyHelper._queryPolicy', 'HTTP status is 401 (Unauthorized) again, but we won\'t second retry, it\'s considered an error');
+                    }
+                }
+            } else {
+                result = response.getBody();
+                SEUtil.debug('PolicyHelper._queryPolicy', 'Response: status = ' + response.getStatusCode() + ', body=' + result);
+            }
+        } catch (ex) {
+            SEUtil.logThrow('PolicyHelper._queryPolicy', ex);
+        } finally {
+            gdtEND = new GlideDateTime();
+            elapsedMs = GlideDateTime.subtract(gdtBGN, gdtEND); //the difference between gdtStart and gdtEnd
+
+            SEUtil.debug('PolicyHelper._queryPolicy', 'Elapsed time in milliseconds is {0} from {1}.{2} to {3}.{4}, TZOffset in milliseconds is ' + gdtBGN.getTZOffset(),
+                elapsedMs.getByFormat('HH:mm:ss.SSS'), gdtBGN.getDisplayValue(), gdtBGN.getNumericValue() % 1000, gdtEND.getDisplayValue(), gdtEND.getNumericValue() % 1000);
+        }
+        return result;
+    },
+
+    _queryMultiplePolicies: function(users, tables) {
+        var dummy = CommunicateWithCCAndPC
+        var _self = this
+        var req = new MultiJPCRequest()
+        var step = 100
+        var curIndex = 0
+        var resourceAttrs = new CEAttres()
+        resourceAttrs.Add_Attre(XACML.Resource_Resource_Id, 'nxl_mock_resource', CEAttributeType.XACML_String)
+        resourceAttrs.Add_Attre(XACML.Resource_Resource_Type, 'gengar', CEAttributeType.XACML_String)
+        var mockResource = new CEResource('nxl_mock_resource', 'gengar', resourceAttrs)
+
+        if(tables.length > 0) {
+            tables.forEach(function(table) {
+                ACTION_SUFFIXES.forEach(function(action) {
+                    var actionName = table.toUpperCase() + '_' + action
+                    req.addAction(actionName)
+                })
+            })
+    
+            req.addResource(mockResource)
+    
+            while(curIndex < users.length) {
+    
+                SEUtil.debug('PolicyHelper._queryMultiplePolicies', '####### No. {0} record query, total users: {1}', curIndex, users.length)
+    
+                for(var i = curIndex; (i < curIndex + step) && (i < users.length); i++) {
+                    var user = users[i]
+                    if(user) {
+                        try
+						{
+							var userAttrs = new CEAttres()
+    
+							userAttrs.Add_Attre(XACML.Subject_Subejct_Id, user.id, CEAttributeType.XACML_String)
+							Object.keys(user).forEach(function (prop) {
+								userAttrs.Add_Attre(prop, user[prop], _self._getXACMLType(typeof user[prop]))
+							})
+            
+							var ceUser = new CEUser(user.id, user.name, userAttrs)
+							req.addUser(ceUser)
+    
+							for(var j = 0; j < req.actions.length; j++) {
+								req.addOrder(user.id, req.actions[j], mockResource.SourceName)
+							}
+						}
+						catch(ex)
+						{
+							SEUtil.logThrow('_queryMultiplePolicies Set Users: ', ex);
+						}
+                    }
+                }
+    
+                var requestBody = req.toJSON()
+                var response = _self._sendRequest(requestBody)
+    
+                //SEUtil.debug('PolicyHelper._queryMultiplePolicies', '{0}', requestBody)
+    
+                try {
+                    var resObj = JSON.parse(response)
+    
+                    if(resObj && resObj.Response && Array.isArray(resObj.Response.Result)) {
+                        resObj.Response.Result.forEach(function(res, index) {
+                            var curOrder = req.orders[index]
+                            if(curOrder) {
+                                var userId = curOrder.id
+                                var actionName = curOrder.action
+                                _self._savePolicy(userId, actionName, JSON.stringify(res))                    
+                            }
+                        })
+                    }
+                } catch(e) {
+                    SEUtil.logThrow('PolicyHelper._queryMultiplePolicies', ex);
+                }
+    
+                req.releaseUsers()
+                req.releaseOrders()
+                curIndex += step
+            }            
+        } else {
+            SEUtil.debug('PolicyHelper._queryMultiplePolicies', 'no table need enforcing')
+        }
+    },
+
+    _sendRequest: function(body) {
+        var dummy = CommunicateWithCCAndPC,
+            timeoutMs = 3000
+
+        try {
+            var url = CommunicateWithCCAndPC.getPc()
+            var token_type = 'Bearer'
+            var access_token = TokenOAuthCC.getToken(global)
+            var request = new sn_ws.RESTMessageV2()
+
+            request.setEndpoint(url)
+            request.setHttpMethod('POST')
+            request.setRequestHeader('Content-Type', 'application/json')
+            request.setRequestHeader('Service', 'EVAL')
+            request.setRequestHeader('Version', '1.0')
+            request.setRequestHeader("Authorization", token_type + ' ' + access_token)
+            request.setRequestBody(body)
+            request.setHttpTimeout(timeoutMs)
+
+            var response = request.execute()
+
+            if (response.haveError()) {
+
+                var errmsg = response.getErrorMessage()
+
+                SEUtil.error('PolicyHelper._sendRequest', 'errcode=' + response.getStatusCode() + ', errmsg=' + errmsg)
+
+                if (401 == response.getStatusCode()) {
+                    if (!this.retried) {
+                        this.retried = true
+                        TokenOAuthCC.forceRefreshToken()
+                        return this._sendRequest(body)
+                    } else {
+                        SEUtil.error('PolicyHelper._sendRequest', 'HTTP status is 401 (Unauthorized) again, but we won\'t second retry, it\'s considered an error')
+                    }
+                }
+            } else {
+                result = response.getBody()
+                //SEUtil.debug('PolicyHelper._sendRequest', 'Response: status = ' + response.getStatusCode() + ', body=' + result)
+            }
+        } catch (ex) {
+            SEUtil.logThrow('PolicyHelper._sendRequest', ex);
+        }
+
+        return result  
+    },
+
+    /**
+     * @param { string } id
+     * @param { string } actionName
+     * @param { string } policy
+     */
+    _savePolicy: function (id, actionName, policy) {
+        if (!id || !actionName || !policy) {
+            SEUtil.debug('PolicyHelper._savePolicy', 'invalid id or actionName or policy')
+            return
+        }
+        SEUtil.debug('PolicyHelper._savePolicy', '{0}, {1}, {2}', id, actionName, policy)
+
+        var target = new GlideRecordSecure(gs.getCurrentScopeName() + '_' + POLICY_TABLE)
+
+        target.initialize()
+        target.id = id
+        target.action = actionName
+        target.policy = policy
+        target.insert()
+    },
+
+    _emptyPolicy: function () {
+        var target = new GlideRecordSecure(gs.getCurrentScopeName() + '_' + POLICY_TABLE)
+        target.query()
+        target.deleteMultiple()
+    },
+});
+]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-08-14 10:59:55</sys_created_on>
+        <sys_id>9dcdc967db33130057eeab7dca961945</sys_id>
+        <sys_mod_count>59</sys_mod_count>
+        <sys_name>PolicyHelper</sys_name>
+        <sys_package display_value="NextLabs Entitlement Management" source="x_230565_emsn">349744b5db475300f1db176a4896190f</sys_package>
+        <sys_policy>read</sys_policy>
+        <sys_scope display_value="NextLabs Entitlement Management">349744b5db475300f1db176a4896190f</sys_scope>
+        <sys_update_name>sys_script_include_9dcdc967db33130057eeab7dca961945</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2019-03-29 03:32:43</sys_updated_on>
+    </sys_script_include>
+</record_update>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<database>
+    <element label="Nxl_Policies" max_length="40" name="x_230565_emsn_nxl_policies" type="collection">
+        <element label="Action" mandatory="true" max_length="65536" name="action" type="string"/>
+        <element label="PolicyName" mandatory="true" max_length="512" name="id" type="string"/>
+        <element label="Policy" max_length="65536" name="policy" type="string"/>
+    </element>
+</database>
